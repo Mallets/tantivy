@@ -365,6 +365,6 @@ pub mod test {
         assert_eq!(serialize_test(VInt(1234u64)), 2);
         assert_eq!(serialize_test(VInt(16_383u64)), 2);
         assert_eq!(serialize_test(VInt(16_384u64)), 3);
-        assert_eq!(serialize_test(VInt(u64::MAX)), 10);
+        assert_eq!(serialize_test(VInt(u64::MAX)), 9);
     }
 }

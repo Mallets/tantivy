@@ -3,160 +3,99 @@ use std::io::{Read, Write};
 
 use super::BinarySerializable;
 
-/// Variable int serializes a u128 number
-pub fn serialize_vint_u128(mut val: u128, output: &mut Vec<u8>) {
-    loop {
-        let next_byte: u8 = (val % 128u128) as u8;
-        val /= 128u128;
-        if val == 0 {
-            output.push(next_byte | STOP_BIT);
-            return;
-        } else {
-            output.push(next_byte);
-        }
+/// Maximum encoded length of a VLE u64: 9 bytes.
+///
+/// The first 8 bytes each carry 7 data bits (56 total). The 9th byte carries
+/// all 8 data bits (the decoder exits its loop at shift position 56 and uses
+/// the full byte value), giving 56 + 8 = 64 bits total.
+const VLE_LEN_MAX: usize = vle_len(u64::MAX);
+
+/// Returns the number of bytes needed to encode `x` as a variable-length integer.
+pub const fn vle_len(x: u64) -> usize {
+    const B1: u64 = u64::MAX << 7;
+    const B2: u64 = u64::MAX << (7 * 2);
+    const B3: u64 = u64::MAX << (7 * 3);
+    const B4: u64 = u64::MAX << (7 * 4);
+    const B5: u64 = u64::MAX << (7 * 5);
+    const B6: u64 = u64::MAX << (7 * 6);
+    const B7: u64 = u64::MAX << (7 * 7);
+    const B8: u64 = u64::MAX << (7 * 8);
+
+    if (x & B1) == 0 {
+        1
+    } else if (x & B2) == 0 {
+        2
+    } else if (x & B3) == 0 {
+        3
+    } else if (x & B4) == 0 {
+        4
+    } else if (x & B5) == 0 {
+        5
+    } else if (x & B6) == 0 {
+        6
+    } else if (x & B7) == 0 {
+        7
+    } else if (x & B8) == 0 {
+        8
+    } else {
+        9
     }
 }
 
-///   Wrapper over a `u128` that serializes as a variable int.
+/// Wrapper over a `u128` that serializes as two VLE-encoded `u64`s (low, high).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct VIntU128(pub u128);
 
 impl BinarySerializable for VIntU128 {
     fn serialize<W: Write + ?Sized>(&self, writer: &mut W) -> io::Result<()> {
-        let mut buffer = vec![];
-        serialize_vint_u128(self.0, &mut buffer);
-        writer.write_all(&buffer)
+        VInt(self.0 as u64).serialize(writer)?;
+        VInt((self.0 >> u64::BITS) as u64).serialize(writer)
     }
 
-    #[allow(clippy::unbuffered_bytes)]
     fn deserialize<R: Read>(reader: &mut R) -> io::Result<Self> {
-        #[allow(clippy::unbuffered_bytes)]
-        let mut bytes = reader.bytes();
-        let mut result = 0u128;
-        let mut shift = 0u64;
-        loop {
-            match bytes.next() {
-                Some(Ok(b)) => {
-                    result |= u128::from(b % 128u8) << shift;
-                    if b >= STOP_BIT {
-                        return Ok(VIntU128(result));
-                    }
-                    shift += 7;
-                }
-                _ => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Reach end of buffer while reading VInt",
-                    ));
-                }
-            }
-        }
+        let lo = VInt::deserialize(reader)?.0 as u128;
+        let hi = VInt::deserialize(reader)?.0 as u128;
+        Ok(VIntU128(lo | (hi << u64::BITS)))
     }
 }
 
-///   Wrapper over a `u64` that serializes as a variable int.
+/// Wrapper over a `u64` that serializes as a variable-length integer.
+///
+/// Uses thubo's VLE convention: bit 7 (`0x80`) is set on continuation bytes,
+/// clear on the final byte. The 9th byte (at maximum encoding length) uses
+/// all 8 bits as data since the decoder knows it is the last byte.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct VInt(pub u64);
 
-const STOP_BIT: u8 = 128;
-
+/// Serializes a `u32` as a variable-length integer into a fixed buffer.
+/// Returns the slice of `buf` containing the encoded bytes.
 #[inline]
 pub fn serialize_vint_u32(val: u32, buf: &mut [u8; 8]) -> &[u8] {
-    const START_2: u64 = 1 << 7;
-    const START_3: u64 = 1 << 14;
-    const START_4: u64 = 1 << 21;
-    const START_5: u64 = 1 << 28;
-
-    const MASK_1: u64 = 127;
-    const MASK_2: u64 = MASK_1 << 7;
-    const MASK_3: u64 = MASK_2 << 7;
-    const MASK_4: u64 = MASK_3 << 7;
-    const MASK_5: u64 = MASK_4 << 7;
-
-    let val = u64::from(val);
-    const STOP_BIT: u64 = 128u64;
-    let (res, num_bytes) = if val < START_2 {
-        (val | STOP_BIT, 1)
-    } else if val < START_3 {
-        (
-            (val & MASK_1) | ((val & MASK_2) << 1) | (STOP_BIT << (8)),
-            2,
-        )
-    } else if val < START_4 {
-        (
-            (val & MASK_1) | ((val & MASK_2) << 1) | ((val & MASK_3) << 2) | (STOP_BIT << (8 * 2)),
-            3,
-        )
-    } else if val < START_5 {
-        (
-            (val & MASK_1)
-                | ((val & MASK_2) << 1)
-                | ((val & MASK_3) << 2)
-                | ((val & MASK_4) << 3)
-                | (STOP_BIT << (8 * 3)),
-            4,
-        )
-    } else {
-        (
-            (val & MASK_1)
-                | ((val & MASK_2) << 1)
-                | ((val & MASK_3) << 2)
-                | ((val & MASK_4) << 3)
-                | ((val & MASK_5) << 4)
-                | (STOP_BIT << (8 * 4)),
-            5,
-        )
-    };
-    *buf = res.to_le_bytes();
-    &buf[0..num_bytes]
+    let mut tmp = [0u8; 9];
+    let len = VInt(val as u64).serialize_into(&mut tmp);
+    buf[..len].copy_from_slice(&tmp[..len]);
+    &buf[..len]
 }
 
-/// Returns the number of bytes covered by a
-/// serialized vint `u32`.
-///
-/// Expects a buffer data that starts
-/// by the serialized `vint`, scans at most 5 bytes ahead until
-/// it finds the vint final byte.
-///
-/// # May Panic
-/// If the payload does not start by a valid `vint`
-fn vint_len(data: &[u8]) -> usize {
-    for (i, &val) in data.iter().enumerate().take(5) {
-        if val >= STOP_BIT {
-            return i + 1;
-        }
-    }
-    panic!("Corrupted data. Invalid VInt 32");
-}
-
-/// Reads a vint `u32` from a buffer, and
-/// consumes its payload data.
+/// Reads a VLE `u32` from a buffer and advances past the consumed bytes.
 ///
 /// # Panics
 ///
-/// If the buffer does not start by a valid
-/// vint payload
+/// If the buffer does not start with a valid VLE payload.
 pub fn read_u32_vint(data: &mut &[u8]) -> u32 {
-    let (result, vlen) = read_u32_vint_no_advance(data);
-    *data = &data[vlen..];
-    result
+    VInt::deserialize(data).expect("Corrupted data. Invalid VLE u32").0 as u32
 }
 
+/// Reads a VLE `u32` from a buffer without advancing.
+/// Returns the decoded value and the number of bytes consumed.
 pub fn read_u32_vint_no_advance(data: &[u8]) -> (u32, usize) {
-    let vlen = vint_len(data);
-    let mut result = 0u32;
-    let mut shift = 0u64;
-    for &b in &data[..vlen] {
-        result |= u32::from(b & 127u8) << shift;
-        shift += 7;
-    }
-    (result, vlen)
+    let vint = VInt::deserialize(&mut &data[..]).expect("Corrupted data. Invalid VLE u32");
+    (vint.0 as u32, vle_len(vint.0))
 }
-/// Write a `u32` as a vint payload.
+
+/// Writes a `u32` as a VLE payload.
 pub fn write_u32_vint<W: io::Write + ?Sized>(val: u32, writer: &mut W) -> io::Result<()> {
-    let mut buf = [0u8; 8];
-    let data = serialize_vint_u32(val, &mut buf);
-    writer.write_all(data)
+    VInt(val as u64).serialize(writer)
 }
 
 impl VInt {
@@ -169,73 +108,82 @@ impl VInt {
     }
 
     pub fn serialize_into_vec(&self, output: &mut Vec<u8>) {
-        let mut buffer = [0u8; 10];
+        let mut buffer = [0u8; 9];
         let num_bytes = self.serialize_into(&mut buffer);
-        output.extend(&buffer[0..num_bytes]);
+        output.extend_from_slice(&buffer[..num_bytes]);
     }
 
-    pub fn serialize_into(&self, buffer: &mut [u8; 10]) -> usize {
-        let mut remaining = self.0;
-        for (i, b) in buffer.iter_mut().enumerate() {
-            let next_byte: u8 = (remaining % 128u64) as u8;
-            remaining /= 128u64;
-            if remaining == 0u64 {
-                *b = next_byte | STOP_BIT;
-                return i + 1;
-            } else {
-                *b = next_byte;
-            }
+    pub fn serialize_into(&self, buffer: &mut [u8; 9]) -> usize {
+        let mut x = self.0;
+        let mut len = 0;
+        while (x & !0x7f_u64) != 0 {
+            buffer[len] = (x as u8) | 0x80;
+            len += 1;
+            x >>= 7;
         }
-        unreachable!();
+        if len != VLE_LEN_MAX {
+            buffer[len] = x as u8;
+            len += 1;
+        }
+        len
     }
 }
 
 impl BinarySerializable for VInt {
     fn serialize<W: Write + ?Sized>(&self, writer: &mut W) -> io::Result<()> {
-        let mut buffer = [0u8; 10];
+        let mut buffer = [0u8; 9];
         let num_bytes = self.serialize_into(&mut buffer);
-        writer.write_all(&buffer[0..num_bytes])
+        writer.write_all(&buffer[..num_bytes])
     }
 
     #[allow(clippy::unbuffered_bytes)]
     fn deserialize<R: Read>(reader: &mut R) -> io::Result<Self> {
         #[allow(clippy::unbuffered_bytes)]
         let mut bytes = reader.bytes();
-        let mut result = 0u64;
-        let mut shift = 0u64;
-        loop {
-            match bytes.next() {
-                Some(Ok(b)) => {
-                    result |= u64::from(b % 128u8) << shift;
-                    if b >= STOP_BIT {
-                        return Ok(VInt(result));
-                    }
-                    shift += 7;
-                }
+
+        let mut b = match bytes.next() {
+            Some(Ok(b)) => b,
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Reached end of buffer while reading VInt",
+                ));
+            }
+        };
+
+        let mut v = 0u64;
+        let mut i = 0usize;
+        while (b & 0x80) != 0 && i != 7 * (VLE_LEN_MAX - 1) {
+            v |= ((b & 0x7f) as u64) << i;
+            b = match bytes.next() {
+                Some(Ok(b)) => b,
                 _ => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "Reach end of buffer while reading VInt",
+                        "Reached end of buffer while reading VInt",
                     ));
                 }
-            }
+            };
+            i += 7;
         }
+        v |= (b as u64) << i;
+        Ok(VInt(v))
     }
 }
 
 #[cfg(test)]
 mod tests {
-
-    use super::{BinarySerializable, VInt, serialize_vint_u32};
+    use super::{BinarySerializable, VInt, VIntU128, VLE_LEN_MAX, serialize_vint_u32, vle_len};
 
     fn aux_test_vint(val: u64) {
-        let mut v = [14u8; 10];
+        let mut v = [14u8; 9];
         let num_bytes = VInt(val).serialize_into(&mut v);
-        for el in &v[num_bytes..10] {
+        for el in &v[num_bytes..] {
             assert_eq!(el, &14u8);
         }
         assert!(num_bytes > 0);
-        if num_bytes < 10 {
+        assert_eq!(num_bytes, vle_len(val));
+        if num_bytes < VLE_LEN_MAX {
             assert!(1u64 << (7 * num_bytes) > val);
         }
         if num_bytes > 1 {
@@ -261,7 +209,7 @@ mod tests {
     }
 
     fn aux_test_serialize_vint_u32(val: u32) {
-        let mut buffer = [0u8; 10];
+        let mut buffer = [0u8; 9];
         let mut buffer2 = [0u8; 8];
         let len_vint = VInt(val as u64).serialize_into(&mut buffer);
         let res2 = serialize_vint_u32(val, &mut buffer2);
@@ -280,5 +228,69 @@ mod tests {
             aux_test_serialize_vint_u32(power_of_128 + 1u32);
         }
         aux_test_serialize_vint_u32(u32::MAX);
+    }
+
+    #[test]
+    fn test_vle_encoding_convention() {
+        let mut buf = [0u8; 9];
+
+        let len = VInt(0).serialize_into(&mut buf);
+        assert_eq!(&buf[..len], &[0x00]);
+
+        let len = VInt(127).serialize_into(&mut buf);
+        assert_eq!(&buf[..len], &[0x7f]);
+
+        let len = VInt(128).serialize_into(&mut buf);
+        assert_eq!(&buf[..len], &[0x80, 0x01]);
+
+        let len = VInt(16384).serialize_into(&mut buf);
+        assert_eq!(&buf[..len], &[0x80, 0x80, 0x01]);
+
+        // 300 = 0b100101100 -> [0xAC, 0x02]
+        let len = VInt(300).serialize_into(&mut buf);
+        assert_eq!(&buf[..len], &[0xAC, 0x02]);
+
+        // u64::MAX encodes as 9 bytes (all 0xFF)
+        let len = VInt(u64::MAX).serialize_into(&mut buf);
+        assert_eq!(len, 9);
+        assert_eq!(&buf[..len], &[0xFF; 9]);
+
+        // 2^63 encodes as 9 bytes: all 0x80
+        let len = VInt(1u64 << 63).serialize_into(&mut buf);
+        assert_eq!(len, 9);
+        assert_eq!(&buf[..len], &[0x80; 9]);
+    }
+
+    #[test]
+    fn test_vle_len_max() {
+        assert_eq!(VLE_LEN_MAX, 9);
+        assert_eq!(vle_len(0), 1);
+        assert_eq!(vle_len(127), 1);
+        assert_eq!(vle_len(128), 2);
+        assert_eq!(vle_len(u32::MAX as u64), 5);
+        assert_eq!(vle_len(u64::MAX), 9);
+        assert_eq!(vle_len(1u64 << 63), 9);
+        assert_eq!(vle_len((1u64 << 56) - 1), 8);
+        assert_eq!(vle_len(1u64 << 56), 9);
+    }
+
+    fn aux_test_vint_u128(val: u128) {
+        let mut buf = Vec::new();
+        VIntU128(val).serialize(&mut buf).unwrap();
+        let decoded = VIntU128::deserialize(&mut &buf[..]).unwrap();
+        assert_eq!(val, decoded.0);
+    }
+
+    #[test]
+    fn test_vint_u128() {
+        aux_test_vint_u128(0);
+        aux_test_vint_u128(1);
+        aux_test_vint_u128(u64::MAX as u128);
+        aux_test_vint_u128(u64::MAX as u128 + 1);
+        aux_test_vint_u128(u128::MAX);
+        aux_test_vint_u128((1u128 << 64) - 1);
+        aux_test_vint_u128(1u128 << 64);
+        aux_test_vint_u128(1u128 << 127);
+        aux_test_vint_u128(340_282_366_920_938_463_463_374_607_431_768_211_455); // u128::MAX
     }
 }

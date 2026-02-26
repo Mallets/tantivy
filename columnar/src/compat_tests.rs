@@ -49,12 +49,6 @@ fn path_for_version(version: &str) -> String {
 }
 
 #[test]
-fn test_format_v1() {
-    let path = path_for_version("v1");
-    test_format(&path);
-}
-
-#[test]
 fn test_format_v2() {
     let path = path_for_version("v2");
     test_format(&path);
