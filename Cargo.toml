@@ -12,6 +12,7 @@ readme = "README.md"
 keywords = ["search", "information", "retrieval"]
 edition = "2021"
 rust-version = "1.85"
+autobenches = false
 exclude = ["benches/*.json", "benches/*.txt"]
 
 [dependencies]
@@ -70,6 +71,8 @@ futures-util = { version = "0.3.28", optional = true }
 futures-channel = { version = "0.3.28", optional = true }
 fnv = "1.0.7"
 typetag = "0.2.21"
+clap = { version = "4", features = ["derive"] }
+dhat = { version = "0.3", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 winapi = "0.3.9"
@@ -112,6 +115,11 @@ debug-assertions = false
 debug-assertions = true
 overflow-checks = true
 
+[profile.profiling]
+inherits = "release"
+debug = 2
+strip = false
+
 [features]
 default = ["mmap", "stopwords", "lz4-compression", "columnar-zstd-compression", "stemmer"]
 stemmer = ["rust-stemmers"]
@@ -133,6 +141,8 @@ quickwit = ["sstable", "futures-util", "futures-channel"]
 # Increases indexing speed, but may lead to extremely rare missing terms, when there's a hash collision.
 # Uses 64bit ahash.
 compare_hash_only = ["stacker/compare_hash_only"]
+
+dhat-heap = ["dep:dhat"]
 
 [workspace]
 members = [
@@ -157,6 +167,10 @@ members = [
 name = "failpoints"
 path = "tests/failpoints/mod.rs"
 required-features = ["failpoints"]
+
+[[bin]]
+name = "profile_indexing"
+path = "benches/profile_indexing.rs"
 
 [[bench]]
 name = "analyzer"
