@@ -10,32 +10,33 @@ use super::BinarySerializable;
 /// the full byte value), giving 56 + 8 = 64 bits total.
 const VLE_LEN_MAX: usize = vle_len(u64::MAX);
 
+const NEXT_BIT: u8 = 1<< 7;
+const BYTE1_MASK: u64 = u64::MAX << 7;
+const BYTE2_MASK: u64 = u64::MAX << (7 * 2);
+const BYTE3_MASK: u64 = u64::MAX << (7 * 3);
+const BYTE4_MASK: u64 = u64::MAX << (7 * 4);
+const BYTE5_MASK: u64 = u64::MAX << (7 * 5);
+const BYTE6_MASK: u64 = u64::MAX << (7 * 6);
+const BYTE7_MASK: u64 = u64::MAX << (7 * 7);
+const BYTE8_MASK: u64 = u64::MAX << (7 * 8);
+
 /// Returns the number of bytes needed to encode `x` as a variable-length integer.
 pub const fn vle_len(x: u64) -> usize {
-    const B1: u64 = u64::MAX << 7;
-    const B2: u64 = u64::MAX << (7 * 2);
-    const B3: u64 = u64::MAX << (7 * 3);
-    const B4: u64 = u64::MAX << (7 * 4);
-    const B5: u64 = u64::MAX << (7 * 5);
-    const B6: u64 = u64::MAX << (7 * 6);
-    const B7: u64 = u64::MAX << (7 * 7);
-    const B8: u64 = u64::MAX << (7 * 8);
-
-    if (x & B1) == 0 {
+    if (x & BYTE1_MASK) == 0 {
         1
-    } else if (x & B2) == 0 {
+    } else if (x & BYTE2_MASK) == 0 {
         2
-    } else if (x & B3) == 0 {
+    } else if (x & BYTE3_MASK) == 0 {
         3
-    } else if (x & B4) == 0 {
+    } else if (x & BYTE4_MASK) == 0 {
         4
-    } else if (x & B5) == 0 {
+    } else if (x & BYTE5_MASK) == 0 {
         5
-    } else if (x & B6) == 0 {
+    } else if (x & BYTE6_MASK) == 0 {
         6
-    } else if (x & B7) == 0 {
+    } else if (x & BYTE7_MASK) == 0 {
         7
-    } else if (x & B8) == 0 {
+    } else if (x & BYTE8_MASK) == 0 {
         8
     } else {
         9
@@ -114,18 +115,42 @@ impl VInt {
     }
 
     pub fn serialize_into(&self, buffer: &mut [u8; 9]) -> usize {
-        let mut x = self.0;
-        let mut len = 0;
-        while (x & !0x7f_u64) != 0 {
-            buffer[len] = (x as u8) | 0x80;
-            len += 1;
-            x >>= 7;
-        }
-        if len != VLE_LEN_MAX {
-            buffer[len] = x as u8;
-            len += 1;
-        }
-        len
+        let x = self.0;
+
+        buffer[0] = x as u8;
+        if (x & BYTE1_MASK) == 0 { return 1; }
+        buffer[0] |= NEXT_BIT;
+
+        buffer[1] = (x >> 7) as u8;
+        if (x & BYTE2_MASK) == 0 { return 2; }
+        buffer[1] |= NEXT_BIT;
+
+        buffer[2] = (x >> 14) as u8;
+        if (x & BYTE3_MASK) == 0 { return 3; }
+        buffer[2] |= NEXT_BIT;
+
+        buffer[3] = (x >> 21) as u8;
+        if (x & BYTE4_MASK) == 0 { return 4; }
+        buffer[3] |= NEXT_BIT;
+
+        buffer[4] = (x >> 28) as u8;
+        if (x & BYTE5_MASK) == 0 { return 5; }
+        buffer[4] |= NEXT_BIT;
+
+        buffer[5] = (x >> 35) as u8;
+        if (x & BYTE6_MASK) == 0 { return 6; }
+        buffer[5] |= NEXT_BIT;
+
+        buffer[6] = (x >> 42) as u8;
+        if (x & BYTE7_MASK) == 0 { return 7; }
+        buffer[6] |= NEXT_BIT;
+
+        buffer[7] = (x >> 49) as u8;
+        if (x & BYTE8_MASK) == 0 { return 8; }
+        buffer[7] |= NEXT_BIT;
+
+        buffer[8] = (x >> 56) as u8;
+        9
     }
 }
 
@@ -153,7 +178,7 @@ impl BinarySerializable for VInt {
 
         let mut v = 0u64;
         let mut i = 0usize;
-        while (b & 0x80) != 0 && i != 7 * (VLE_LEN_MAX - 1) {
+        while (b & NEXT_BIT) != 0 && i != 7 * (VLE_LEN_MAX - 1) {
             v |= ((b & 0x7f) as u64) << i;
             b = match bytes.next() {
                 Some(Ok(b)) => b,
@@ -173,7 +198,7 @@ impl BinarySerializable for VInt {
 
 #[cfg(test)]
 mod tests {
-    use super::{BinarySerializable, VInt, VIntU128, VLE_LEN_MAX, serialize_vint_u32, vle_len};
+    use super::{BinarySerializable, VInt, VIntU128, NEXT_BIT, VLE_LEN_MAX, serialize_vint_u32, vle_len};
 
     fn aux_test_vint(val: u64) {
         let mut v = [14u8; 9];
@@ -241,10 +266,10 @@ mod tests {
         assert_eq!(&buf[..len], &[0x7f]);
 
         let len = VInt(128).serialize_into(&mut buf);
-        assert_eq!(&buf[..len], &[0x80, 0x01]);
+        assert_eq!(&buf[..len], &[NEXT_BIT, 0x01]);
 
         let len = VInt(16384).serialize_into(&mut buf);
-        assert_eq!(&buf[..len], &[0x80, 0x80, 0x01]);
+        assert_eq!(&buf[..len], &[NEXT_BIT, NEXT_BIT, 0x01]);
 
         // 300 = 0b100101100 -> [0xAC, 0x02]
         let len = VInt(300).serialize_into(&mut buf);
@@ -255,10 +280,10 @@ mod tests {
         assert_eq!(len, 9);
         assert_eq!(&buf[..len], &[0xFF; 9]);
 
-        // 2^63 encodes as 9 bytes: all 0x80
+        // 2^63 encodes as 9 bytes: all NEXT_BIT
         let len = VInt(1u64 << 63).serialize_into(&mut buf);
         assert_eq!(len, 9);
-        assert_eq!(&buf[..len], &[0x80; 9]);
+        assert_eq!(&buf[..len], &[NEXT_BIT; 9]);
     }
 
     #[test]
