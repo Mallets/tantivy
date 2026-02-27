@@ -338,7 +338,7 @@ fn binary_deserialize_bytes(data: &[u8]) -> &[u8] {
 /// BinarySerializable alternative to write references
 fn write_bytes_into(vec: &mut Vec<u8>, data: &[u8]) -> u32 {
     let pos = vec.len() as u32;
-    let mut buf = [0u8; 8];
+    let mut buf = [0u8; 5];
     let len_vint_bytes = serialize_vint_u32(data.len() as u32, &mut buf);
     vec.extend_from_slice(len_vint_bytes);
     vec.extend_from_slice(data);

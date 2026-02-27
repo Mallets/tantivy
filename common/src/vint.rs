@@ -71,7 +71,7 @@ pub struct VInt(pub u64);
 /// Serializes a `u32` as a variable-length integer into a fixed buffer.
 /// Returns the slice of `buf` containing the encoded bytes.
 #[inline]
-pub fn serialize_vint_u32(val: u32, buf: &mut [u8; 8]) -> &[u8] {
+pub fn serialize_vint_u32(val: u32, buf: &mut [u8; 5]) -> &[u8] {
     let mut tmp = [0u8; 9];
     let len = VInt(val as u64).serialize_into(&mut tmp);
     buf[..len].copy_from_slice(&tmp[..len]);
@@ -235,7 +235,7 @@ mod tests {
 
     fn aux_test_serialize_vint_u32(val: u32) {
         let mut buffer = [0u8; 9];
-        let mut buffer2 = [0u8; 8];
+        let mut buffer2 = [0u8; 5];
         let len_vint = VInt(val as u64).serialize_into(&mut buffer);
         let res2 = serialize_vint_u32(val, &mut buffer2);
         assert_eq!(&buffer[..len_vint], res2, "array wrong for {val}");

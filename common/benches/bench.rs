@@ -9,8 +9,8 @@ fn bench_vint() {
     let vals: Vec<u32> = (0..20_000).collect();
     runner.bench_function("bench_vint", move |_| {
         let mut out = 0u64;
-        for val in vals.iter().cloned() {
-            let mut buf = [0u8; 8];
+        for val in vals.iter().copied() {
+            let mut buf = [0u8; 5];
             serialize_vint_u32(val, &mut buf);
             out += u64::from(buf[0]);
         }
@@ -20,8 +20,8 @@ fn bench_vint() {
     let vals: Vec<u32> = (0..20_000).choose_multiple(&mut rng(), 100_000);
     runner.bench_function("bench_vint_rand", move |_| {
         let mut out = 0u64;
-        for val in vals.iter().cloned() {
-            let mut buf = [0u8; 8];
+        for val in vals.iter().copied() {
+            let mut buf = [0u8; 5];
             serialize_vint_u32(val, &mut buf);
             out += u64::from(buf[0]);
         }
