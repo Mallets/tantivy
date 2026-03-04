@@ -22,7 +22,9 @@ pub use json_path_writer::JsonPathWriter;
 pub use ownedbytes::{OwnedBytes, StableDeref};
 pub use serialize::{BinarySerializable, DeserializeFrom, FixedSize};
 pub use vint::{
-    VInt, VIntU128, read_u32_vint, read_u32_vint_no_advance, serialize_vint_u32, write_u32_vint,
+    VInt, VIntU128, VLE_U32_QUIC_LEN_MAX, VLE_U32_QUIC_VAL_MAX, decode_vint_u32_quic,
+    read_u32_vint, read_u32_vint_no_advance, serialize_vint_u32, serialize_vint_u32_quic,
+    read_u32_vint_quic, vle_u32_quic_len, write_u32_vint, write_u32_vint_quic,
 };
 pub use writer::{AntiCallToken, CountingWriter, TerminatingWrite};
 

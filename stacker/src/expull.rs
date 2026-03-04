@@ -1,6 +1,8 @@
 use std::mem;
 
-use common::serialize_vint_u32;
+use common::{
+    VLE_U32_QUIC_LEN_MAX, VLE_U32_QUIC_VAL_MAX, serialize_vint_u32, serialize_vint_u32_quic,
+};
 
 use crate::fastcpy::fast_short_slice_copy;
 use crate::{Addr, MemoryArena};
@@ -79,6 +81,14 @@ impl ExpUnrolledLinkedListWriter<'_> {
     pub fn write_u32_vint(&mut self, val: u32) {
         let mut buf = [0u8; 8];
         let data = serialize_vint_u32(val, &mut buf);
+        self.extend_from_slice(data);
+    }
+
+    #[inline]
+    pub fn write_u32_vint_quic(&mut self, val: u32) {
+        debug_assert!(val <= VLE_U32_QUIC_VAL_MAX);
+        let mut buf = [0u8; VLE_U32_QUIC_LEN_MAX];
+        let data = serialize_vint_u32_quic(val, &mut buf);
         self.extend_from_slice(data);
     }
 
@@ -177,7 +187,7 @@ impl ExpUnrolledLinkedList {
 
 #[cfg(test)]
 mod tests {
-    use common::{read_u32_vint, write_u32_vint};
+    use common::{decode_vint_u32_quic, read_u32_vint, write_u32_vint, write_u32_vint_quic};
 
     use super::*;
 
@@ -460,6 +470,79 @@ mod tests {
 
         // This should panic with our custom error message
         eull.increment_num_blocks();
+    }
+
+    #[test]
+    fn test_eull_long_quic() {
+        let mut arena = MemoryArena::default();
+        let mut eull = ExpUnrolledLinkedList::default();
+        let data: Vec<u32> = (0..100).collect();
+        for &el in &data {
+            eull.writer(&mut arena).write_u32_vint_quic(el);
+        }
+        let mut buffer = Vec::new();
+        eull.read_to_end(&arena, &mut buffer);
+        let mut result = vec![];
+        let mut remaining = &buffer[..];
+        while !remaining.is_empty() {
+            let (val, len) = decode_vint_u32_quic(remaining);
+            remaining = &remaining[len..];
+            result.push(val);
+        }
+        assert_eq!(&result[..], &data[..]);
+    }
+
+    #[test]
+    fn test_eull_interlaced_quic() {
+        let mut arena = MemoryArena::default();
+        let mut stack = ExpUnrolledLinkedList::default();
+        let mut stack2 = ExpUnrolledLinkedList::default();
+
+        let mut vec1: Vec<u8> = vec![];
+        let mut vec2: Vec<u8> = vec![];
+
+        for i in 0..9 {
+            stack.writer(&mut arena).write_u32_vint_quic(i);
+            assert!(write_u32_vint_quic(i, &mut vec1).is_ok());
+            if i % 2 == 0 {
+                stack2.writer(&mut arena).write_u32_vint_quic(i);
+                assert!(write_u32_vint_quic(i, &mut vec2).is_ok());
+            }
+        }
+        let mut res1 = vec![];
+        let mut res2 = vec![];
+        stack.read_to_end(&arena, &mut res1);
+        stack2.read_to_end(&arena, &mut res2);
+        assert_eq!(&vec1[..], &res1[..]);
+        assert_eq!(&vec2[..], &res2[..]);
+    }
+
+    #[test]
+    fn test_multiple_eull_with_large_block_counts_quic() {
+        let mut arena = MemoryArena::default();
+        let mut eull1 = ExpUnrolledLinkedList::default();
+        let mut eull2 = ExpUnrolledLinkedList::default();
+
+        for i in 0..10_000u32 {
+            eull1.writer(&mut arena).write_u32_vint_quic(i);
+            eull2.writer(&mut arena).write_u32_vint_quic(i * 2);
+        }
+
+        let mut buf1 = Vec::new();
+        let mut buf2 = Vec::new();
+        eull1.read_to_end(&arena, &mut buf1);
+        eull2.read_to_end(&arena, &mut buf2);
+
+        let mut remaining1 = &buf1[..];
+        let mut remaining2 = &buf2[..];
+        for i in 0..10_000u32 {
+            let (v1, len1) = decode_vint_u32_quic(remaining1);
+            remaining1 = &remaining1[len1..];
+            let (v2, len2) = decode_vint_u32_quic(remaining2);
+            remaining2 = &remaining2[len2..];
+            assert_eq!(v1, i);
+            assert_eq!(v2, i * 2);
+        }
     }
 }
 
