@@ -1,4 +1,4 @@
-use common::{decode_vint_u32_quic, read_u32_vint};
+use common::{decode_vint_u32_short, read_u32_vint};
 use stacker::{ExpUnrolledLinkedList, MemoryArena};
 
 use crate::postings::FieldSerializer;
@@ -46,24 +46,24 @@ impl Iterator for VInt32Reader<'_> {
     }
 }
 
-pub struct VIntQuic32Reader<'a> {
+pub struct VIntShortReader<'a> {
     data: &'a [u8],
 }
 
-impl<'a> VIntQuic32Reader<'a> {
-    fn new(data: &'a [u8]) -> VIntQuic32Reader<'a> {
-        VIntQuic32Reader { data }
+impl<'a> VIntShortReader<'a> {
+    fn new(data: &'a [u8]) -> VIntShortReader<'a> {
+        VIntShortReader { data }
     }
 }
 
-impl Iterator for VIntQuic32Reader<'_> {
+impl Iterator for VIntShortReader<'_> {
     type Item = u32;
 
     fn next(&mut self) -> Option<u32> {
         if self.data.is_empty() {
             None
         } else {
-            let (val, len) = decode_vint_u32_quic(self.data);
+            let (val, len) = decode_vint_u32_short(self.data);
             self.data = &self.data[len..];
             Some(val)
         }
@@ -125,7 +125,7 @@ impl Recorder for DocIdRecorder {
     fn new_doc(&mut self, doc: DocId, arena: &mut MemoryArena) {
         let delta = doc - self.current_doc;
         self.current_doc = doc;
-        self.stack.writer(arena).write_u32_vint_quic(delta);
+        self.stack.writer(arena).write_u32_vint_short(delta);
     }
 
     #[inline]
@@ -143,7 +143,7 @@ impl Recorder for DocIdRecorder {
         let buffer = buffer_lender.lend_u8();
         // TODO avoid reading twice.
         self.stack.read_to_end(arena, buffer);
-        let iter = get_sum_reader(VIntQuic32Reader::new(&buffer[..]));
+        let iter = get_sum_reader(VIntShortReader::new(&buffer[..]));
         for doc_id in iter {
             serializer.write_doc(doc_id, 0u32, &[][..]);
         }
@@ -187,7 +187,7 @@ impl Recorder for TermFrequencyRecorder {
         let delta = doc - self.current_doc;
         self.term_doc_freq += 1;
         self.current_doc = doc;
-        self.stack.writer(arena).write_u32_vint_quic(delta);
+        self.stack.writer(arena).write_u32_vint_short(delta);
     }
 
     #[inline]
@@ -198,7 +198,7 @@ impl Recorder for TermFrequencyRecorder {
     #[inline]
     fn close_doc(&mut self, arena: &mut MemoryArena) {
         debug_assert!(self.current_tf > 0);
-        self.stack.writer(arena).write_u32_vint_quic(self.current_tf);
+        self.stack.writer(arena).write_u32_vint_short(self.current_tf);
         self.current_tf = 0;
     }
 
@@ -210,7 +210,7 @@ impl Recorder for TermFrequencyRecorder {
     ) {
         let buffer = buffer_lender.lend_u8();
         self.stack.read_to_end(arena, buffer);
-        let mut u32_it = VIntQuic32Reader::new(&buffer[..]);
+        let mut u32_it = VIntShortReader::new(&buffer[..]);
         let mut prev_doc = 0;
         while let Some(delta_doc_id) = u32_it.next() {
             let doc_id = prev_doc + delta_doc_id;
@@ -244,19 +244,19 @@ impl Recorder for TfAndPositionRecorder {
         let delta = doc - self.current_doc;
         self.current_doc = doc;
         self.term_doc_freq += 1u32;
-        self.stack.writer(arena).write_u32_vint_quic(delta);
+        self.stack.writer(arena).write_u32_vint_short(delta);
     }
 
     #[inline]
     fn record_position(&mut self, position: u32, arena: &mut MemoryArena) {
         self.stack
             .writer(arena)
-            .write_u32_vint_quic(position.wrapping_add(1u32));
+            .write_u32_vint_short(position.wrapping_add(1u32));
     }
 
     #[inline]
     fn close_doc(&mut self, arena: &mut MemoryArena) {
-        self.stack.writer(arena).write_u32_vint_quic(POSITION_END);
+        self.stack.writer(arena).write_u32_vint_short(POSITION_END);
     }
 
     fn serialize(
@@ -267,7 +267,7 @@ impl Recorder for TfAndPositionRecorder {
     ) {
         let (buffer_u8, buffer_positions) = buffer_lender.lend_all();
         self.stack.read_to_end(arena, buffer_u8);
-        let mut u32_it = VIntQuic32Reader::new(&buffer_u8[..]);
+        let mut u32_it = VIntShortReader::new(&buffer_u8[..]);
         let mut prev_doc = 0;
         while let Some(delta_doc_id) = u32_it.next() {
             let doc_id = prev_doc + delta_doc_id;
@@ -298,9 +298,9 @@ impl Recorder for TfAndPositionRecorder {
 #[cfg(test)]
 mod tests {
 
-    use common::{write_u32_vint, write_u32_vint_quic};
+    use common::{write_u32_vint, write_u32_vint_short};
 
-    use super::{BufferLender, VInt32Reader, VIntQuic32Reader};
+    use super::{BufferLender, VInt32Reader, VIntShortReader};
 
     #[test]
     fn test_buffer_lender() {
@@ -340,16 +340,16 @@ mod tests {
     }
 
     #[test]
-    fn test_vint_u32_quic() {
+    fn test_vint_u32_short() {
         let mut buffer = vec![];
-        let vals = [0u32, 1, 63, 16383, 324_234_234, (1 << 30) - 1];
+        let vals = [0u32, 1, 251, 252, 507, 508, 65787, u32::MAX];
         for &i in &vals {
-            assert!(write_u32_vint_quic(i, &mut buffer).is_ok());
+            assert!(write_u32_vint_short(i, &mut buffer).is_ok());
         }
-        // 0 -> 1 byte, 1 -> 1 byte, 63 -> 1 byte, 16383 -> 2 bytes,
-        // 324_234_234 -> 4 bytes, (1<<30)-1 -> 4 bytes
-        assert_eq!(buffer.len(), 1 + 1 + 1 + 2 + 4 + 4);
-        let res: Vec<u32> = VIntQuic32Reader::new(&buffer[..]).collect();
+        // 0 -> 1 byte, 1 -> 1 byte, 251 -> 1 byte, 252 -> 2 bytes,
+        // 507 -> 2 bytes, 508 -> 3 bytes, 65787 -> 3 bytes, u32::MAX -> 5 bytes
+        assert_eq!(buffer.len(), 1 + 1 + 1 + 2 + 2 + 3 + 3 + 5);
+        let res: Vec<u32> = VIntShortReader::new(&buffer[..]).collect();
         assert_eq!(&res[..], &vals[..]);
     }
 }

@@ -153,8 +153,8 @@ pub fn read_u32_vint_no_advance(data: &[u8]) -> (u32, usize) {
     (result, vlen)
 }
 
-pub fn read_u32_vint_quic(data: &mut &[u8]) -> u32 {
-    let (result, vlen) = decode_vint_u32_quic(data);
+pub fn read_u32_vint_short(data: &mut &[u8]) -> u32 {
+    let (result, vlen) = decode_vint_u32_short(data);
     *data = &data[vlen..];
     result
 }
@@ -166,106 +166,90 @@ pub fn write_u32_vint<W: io::Write + ?Sized>(val: u32, writer: &mut W) -> io::Re
     writer.write_all(data)
 }
 
-pub fn write_u32_vint_quic<W: io::Write + ?Sized>(val: u32, writer: &mut W) -> io::Result<()> {
-    let mut buf = [0u8; VLE_U32_QUIC_LEN_MAX];
-    let data = serialize_vint_u32_quic(val, &mut buf);
+pub fn write_u32_vint_short<W: io::Write + ?Sized>(val: u32, writer: &mut W) -> io::Result<()> {
+    let mut buf = [0u8; VLE_U32_SHORT_LEN_MAX];
+    let data = serialize_vint_u32_short(val, &mut buf);
     writer.write_all(data)
 }
 
 // ---------------------------------------------------------------------------
-// QUIC-style 2-bit-tag, little-endian variable-length u32 encoding
+// Short VLE u32 encoding
 // ---------------------------------------------------------------------------
 
-/// Maximum encoded length of a QUIC-style VLE u32: 4 bytes.
-pub const VLE_U32_QUIC_LEN_MAX: usize = 4;
+/// Buffer size for encoding a `u32` in the short VLE format.
+/// The encoder writes into a `u64`, so the buffer is 8 bytes,
+/// even though the actual encoded length is at most 5.
+pub const VLE_U32_SHORT_LEN_MAX: usize = 8;
 
-/// Maximum value encodable as a QUIC-style VLE u32 (30-bit).
-pub const VLE_U32_QUIC_VAL_MAX: u32 = (1 << 30) - 1;
+/// Maximum value encodable as a short VLE u32: `u32::MAX`.
+pub const VLE_U32_SHORT_VAL_MAX: u32 = u32::MAX;
 
-const Q32_B1: u32 = !(u32::MAX >> 26);
-const Q32_B2: u32 = !(u32::MAX >> 18);
-const Q32_B3: u32 = !(u32::MAX >> 10);
+const SHORT_B1: u32 = 251;
+const SHORT_B2: u32 = 252 + 0xFF;
+const SHORT_B3: u32 = 252 + 0xFFFF;
+const SHORT_B4: u32 = 252 + 0xFFFFFF;
 
-/// QUIC-style VLE-encodes a `u32` into `buf` using little-endian byte order
-/// with a 2-bit length tag in the LSBs of the first byte, returning the
-/// encoded slice.
+/// Short VLE-encodes a `u32` into `buf`, returning the encoded slice.
 ///
-/// The 2 LSBs of the first byte encode the total length:
-/// - `0b00` -> 1 byte  (6 value bits)
-/// - `0b01` -> 2 bytes (14 value bits)
-/// - `0b10` -> 3 bytes (22 value bits)
-/// - `0b11` -> 4 bytes (30 value bits)
-///
-/// `val` must be at most [`VLE_U32_QUIC_VAL_MAX`].
+/// First byte 0–251 stores the value directly. Bytes 252–255 are length tags
+/// indicating 1–4 trailing bytes that hold `(val - 252)` in little-endian.
 #[inline]
-pub fn serialize_vint_u32_quic(val: u32, buf: &mut [u8; VLE_U32_QUIC_LEN_MAX]) -> &[u8] {
-    debug_assert!(val <= VLE_U32_QUIC_VAL_MAX);
-
-    let x = val << 2;
-    let (res, num_bytes) = if (val & Q32_B1) == 0 {
-        (x, 1)
-    } else if (val & Q32_B2) == 0 {
-        (x | 0b01, 2)
-    } else if (val & Q32_B3) == 0 {
-        (x | 0b10, 3)
+pub fn serialize_vint_u32_short(val: u32, buf: &mut [u8; VLE_U32_SHORT_LEN_MAX]) -> &[u8] {
+    let n = if val <= SHORT_B1 {
+        *buf = u64::from(val).to_le_bytes();
+        1
+    } else if val <= SHORT_B2 {
+        let rem = u64::from(val - 252);
+        *buf = (252u64 | (rem << 8)).to_le_bytes();
+        2
+    } else if val <= SHORT_B3 {
+        let rem = u64::from(val - 252);
+        *buf = (253u64 | (rem << 8)).to_le_bytes();
+        3
+    } else if val <= SHORT_B4 {
+        let rem = u64::from(val - 252);
+        *buf = (254u64 | (rem << 8)).to_le_bytes();
+        4
     } else {
-        (x | 0b11, 4)
+        let rem = u64::from(val - 252);
+        *buf = (255u64 | (rem << 8)).to_le_bytes();
+        5
     };
-    *buf = res.to_le_bytes();
-    &buf[..num_bytes]
+    &buf[..n]
 }
 
-/// Decodes a QUIC-style VLE `u32` from `buf`.
+/// Decodes a short VLE `u32` from `buf`.
 /// Returns `(value, bytes_consumed)`.
 ///
 /// # Panics
 ///
-/// If `buf` is too short for the encoded length.
-pub fn decode_vint_u32_quic(buf: &[u8]) -> (u32, usize) {
-    assert!(!buf.is_empty(), "decode_vint_u32_quic: empty buffer");
-
-    // SAFETY: buf is non-empty (asserted above) and each arm only reads
-    // indices 0..len-1 where len <= 4. The caller must provide a buffer
-    // at least as long as the encoded length indicated by the 2 LSBs of buf[0].
-    unsafe {
-        let b0 = *buf.get_unchecked(0);
-        let tag = b0 & 0b11;
-        let len = 1 + tag as usize;
-
-        let mut v = [0u8; VLE_U32_QUIC_LEN_MAX];
-        v[0] = b0;
-        match tag {
-            0b00 => {}
-            0b01 => {
-                v[1] = *buf.get_unchecked(1);
-            }
-            0b10 => {
-                v[1] = *buf.get_unchecked(1);
-                v[2] = *buf.get_unchecked(2);
-            }
-            _ => {
-                v[1] = *buf.get_unchecked(1);
-                v[2] = *buf.get_unchecked(2);
-                v[3] = *buf.get_unchecked(3);
-            }
-        }
-
-        (u32::from_le_bytes(v) >> 2, len)
+/// If `buf` is empty or too short for the encoded length.
+pub fn decode_vint_u32_short(buf: &[u8]) -> (u32, usize) {
+    assert!(!buf.is_empty(), "decode_vint_u32_short: empty buffer");
+    let tag = buf[0];
+    if tag <= 251 {
+        (tag as u32, 1)
+    } else {
+        let extra = (tag - 251) as usize;
+        assert!(buf.len() >= 1 + extra, "decode_vint_u32_short: buffer too short");
+        let mut v = [0u8; 4];
+        v[..extra].copy_from_slice(&buf[1..1 + extra]);
+        (u32::from_le_bytes(v) + 252, 1 + extra)
     }
 }
 
-/// Returns the number of bytes needed to QUIC-style VLE-encode `x`.
-///
-/// `x` must be at most [`VLE_U32_QUIC_VAL_MAX`].
-pub const fn vle_u32_quic_len(x: u32) -> usize {
-    if (x & Q32_B1) == 0 {
+/// Returns the number of bytes needed to short VLE-encode `x`.
+pub const fn vle_u32_short_len(x: u32) -> usize {
+    if x <= SHORT_B1 {
         1
-    } else if (x & Q32_B2) == 0 {
+    } else if x <= SHORT_B2 {
         2
-    } else if (x & Q32_B3) == 0 {
+    } else if x <= SHORT_B3 {
         3
-    } else {
+    } else if x <= SHORT_B4 {
         4
+    } else {
+        5
     }
 }
 
@@ -337,9 +321,9 @@ impl BinarySerializable for VInt {
 mod tests {
 
     use super::{
-        BinarySerializable, Q32_B1, Q32_B2, Q32_B3, VInt, VLE_U32_QUIC_LEN_MAX,
-        VLE_U32_QUIC_VAL_MAX, decode_vint_u32_quic, serialize_vint_u32, serialize_vint_u32_quic,
-        vle_u32_quic_len,
+        BinarySerializable, SHORT_B1, SHORT_B2, SHORT_B3, SHORT_B4, VInt, VLE_U32_SHORT_LEN_MAX,
+        VLE_U32_SHORT_VAL_MAX, decode_vint_u32_short, serialize_vint_u32, serialize_vint_u32_short,
+        vle_u32_short_len,
     };
 
     fn aux_test_vint(val: u64) {
@@ -396,96 +380,93 @@ mod tests {
         aux_test_serialize_vint_u32(u32::MAX);
     }
 
-    // ---- QUIC-style LE u32 tests ----
+    // ---- Short VLE u32 tests ----
 
-    fn aux_test_quic32(val: u32) {
-        let mut buf = [0u8; VLE_U32_QUIC_LEN_MAX];
-        let encoded = serialize_vint_u32_quic(val, &mut buf);
+    fn aux_test_short(val: u32) {
+        let mut buf = [0u8; VLE_U32_SHORT_LEN_MAX];
+        let encoded = serialize_vint_u32_short(val, &mut buf);
         let num_bytes = encoded.len();
 
-        assert!(num_bytes > 0 && num_bytes <= VLE_U32_QUIC_LEN_MAX);
-        assert_eq!(num_bytes, vle_u32_quic_len(val));
+        assert!(num_bytes > 0 && num_bytes <= 5);
+        assert_eq!(num_bytes, vle_u32_short_len(val));
 
-        let (decoded, consumed) = decode_vint_u32_quic(&buf[..num_bytes]);
+        let (decoded, consumed) = decode_vint_u32_short(&buf[..num_bytes]);
         assert_eq!(decoded, val, "roundtrip failed for {val}");
         assert_eq!(consumed, num_bytes);
     }
 
     #[test]
-    fn test_quic32_le_roundtrip() {
-        aux_test_quic32(0);
-        aux_test_quic32(1);
-        aux_test_quic32(63);
-        aux_test_quic32(64);
-        aux_test_quic32(16383);
-        aux_test_quic32(16384);
-        aux_test_quic32(4_194_303);
-        aux_test_quic32(4_194_304);
-        aux_test_quic32(VLE_U32_QUIC_VAL_MAX);
+    fn test_short_roundtrip() {
+        aux_test_short(0);
+        aux_test_short(1);
+        aux_test_short(SHORT_B1);
+        aux_test_short(SHORT_B1 + 1);
+        aux_test_short(SHORT_B2);
+        aux_test_short(SHORT_B2 + 1);
+        aux_test_short(SHORT_B3);
+        aux_test_short(SHORT_B3 + 1);
+        aux_test_short(SHORT_B4);
+        aux_test_short(SHORT_B4 + 1);
+        aux_test_short(VLE_U32_SHORT_VAL_MAX);
 
-        aux_test_quic32(!Q32_B1);
-        aux_test_quic32(!Q32_B1 + 1);
-        aux_test_quic32(!Q32_B2);
-        aux_test_quic32(!Q32_B2 + 1);
-        aux_test_quic32(!Q32_B3);
-        aux_test_quic32(!Q32_B3 + 1);
-
-        for shift in 0..30 {
-            aux_test_quic32(1u32 << shift);
-            aux_test_quic32((1u32 << shift) - 1);
+        for shift in 0..32 {
+            aux_test_short(1u32 << shift);
+            aux_test_short((1u32 << shift).wrapping_sub(1));
         }
     }
 
     #[test]
-    fn test_quic32_le_encoding_convention() {
-        let mut buf = [0u8; VLE_U32_QUIC_LEN_MAX];
+    fn test_short_encoding_convention() {
+        let mut buf = [0u8; VLE_U32_SHORT_LEN_MAX];
 
-        // 1-byte: LSB tag 0b00
-        let s = serialize_vint_u32_quic(0, &mut buf);
-        assert_eq!(s, &[0x00]);
+        // 1-byte: values 0-251 stored directly
+        let s = serialize_vint_u32_short(0, &mut buf);
+        assert_eq!(s, &[0u8]);
 
-        let s = serialize_vint_u32_quic(1, &mut buf);
-        assert_eq!(s, &[0x04]); // (1 << 2) = 4
+        let s = serialize_vint_u32_short(1, &mut buf);
+        assert_eq!(s, &[1u8]);
 
-        let s = serialize_vint_u32_quic(63, &mut buf);
-        assert_eq!(s, &[0xFC]); // (63 << 2) = 252
+        let s = serialize_vint_u32_short(251, &mut buf);
+        assert_eq!(s, &[251u8]);
 
-        // 2-byte: LSB tag 0b01, little-endian
-        let s = serialize_vint_u32_quic(64, &mut buf);
+        // 2-byte: tag 252
+        let s = serialize_vint_u32_short(252, &mut buf);
+        assert_eq!(s[0], 252);
         assert_eq!(s.len(), 2);
-        assert_eq!(s[0] & 0b11, 0b01);
 
-        let s = serialize_vint_u32_quic(0x100, &mut buf);
-        assert_eq!(s.len(), 2);
-        assert_eq!(s[0], 0x01);
-        assert_eq!(s[1], 0x04);
-
-        // 3-byte: LSB tag 0b10
-        let s = serialize_vint_u32_quic(0x4000, &mut buf);
+        // 3-byte: tag 253
+        let s = serialize_vint_u32_short(SHORT_B2 + 1, &mut buf);
+        assert_eq!(s[0], 253);
         assert_eq!(s.len(), 3);
-        assert_eq!(s[0] & 0b11, 0b10);
 
-        // 4-byte: LSB tag 0b11
-        let s = serialize_vint_u32_quic(VLE_U32_QUIC_VAL_MAX, &mut buf);
+        // 4-byte: tag 254
+        let s = serialize_vint_u32_short(SHORT_B3 + 1, &mut buf);
+        assert_eq!(s[0], 254);
         assert_eq!(s.len(), 4);
-        assert_eq!(s[0] & 0b11, 0b11);
+
+        // 5-byte: tag 255
+        let s = serialize_vint_u32_short(SHORT_B4 + 1, &mut buf);
+        assert_eq!(s[0], 255);
+        assert_eq!(s.len(), 5);
     }
 
     #[test]
-    fn test_quic32_le_len() {
-        assert_eq!(vle_u32_quic_len(0), 1);
-        assert_eq!(vle_u32_quic_len(63), 1);
-        assert_eq!(vle_u32_quic_len(64), 2);
-        assert_eq!(vle_u32_quic_len(16383), 2);
-        assert_eq!(vle_u32_quic_len(16384), 3);
-        assert_eq!(vle_u32_quic_len(4_194_303), 3);
-        assert_eq!(vle_u32_quic_len(4_194_304), 4);
-        assert_eq!(vle_u32_quic_len(VLE_U32_QUIC_VAL_MAX), 4);
+    fn test_short_len() {
+        assert_eq!(vle_u32_short_len(0), 1);
+        assert_eq!(vle_u32_short_len(251), 1);
+        assert_eq!(vle_u32_short_len(252), 2);
+        assert_eq!(vle_u32_short_len(SHORT_B2), 2);
+        assert_eq!(vle_u32_short_len(SHORT_B2 + 1), 3);
+        assert_eq!(vle_u32_short_len(SHORT_B3), 3);
+        assert_eq!(vle_u32_short_len(SHORT_B3 + 1), 4);
+        assert_eq!(vle_u32_short_len(SHORT_B4), 4);
+        assert_eq!(vle_u32_short_len(SHORT_B4 + 1), 5);
+        assert_eq!(vle_u32_short_len(VLE_U32_SHORT_VAL_MAX), 5);
     }
 
     #[test]
     #[should_panic(expected = "empty buffer")]
-    fn test_quic32_le_decode_empty() {
-        decode_vint_u32_quic(&[]);
+    fn test_short_decode_empty() {
+        decode_vint_u32_short(&[]);
     }
 }

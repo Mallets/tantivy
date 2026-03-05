@@ -132,7 +132,7 @@ pub struct DocIdRecorder {
 }
 impl DocIdRecorder {
     fn new_doc(&mut self, doc: u32, arena: &mut MemoryArena) {
-        self.stack.writer(arena).write_u32_vint_quic(doc);
+        self.stack.writer(arena).write_u32_vint_short(doc);
     }
 }
 
