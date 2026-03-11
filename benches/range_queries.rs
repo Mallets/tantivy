@@ -4,7 +4,7 @@ use binggan::{black_box, BenchGroup, BenchRunner};
 use rand::prelude::*;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use tantivy::collector::{Count, DocSetCollector, TopDocs};
+use tantivy::collector::{Count, TopDocs};
 use tantivy::query::RangeQuery;
 use tantivy::schema::{Schema, FAST, INDEXED};
 use tantivy::{doc, Index, Order, ReloadPolicy, Searcher, Term};
@@ -234,27 +234,7 @@ fn add_bench_task_count(
     bench_group.register(task_name, move |_| black_box(search_task.run()));
 }
 
-fn add_bench_task_docset(
-    bench_group: &mut BenchGroup,
-    bench_index: &BenchIndex,
-    query: RangeQuery,
-    collector_name: &str,
-    field_name: &str,
-    range_low: u64,
-    range_high: u64,
-) {
-    let task_name = format!(
-        "range_{}_[{} TO {}]_{}",
-        field_name, range_low, range_high, collector_name
-    );
-
-    let search_task = DocSetSearchTask {
-        searcher: bench_index.searcher.clone(),
-        query,
-    };
-    bench_group.register(task_name, move |_| black_box(search_task.run()));
-}
-
+#[allow(clippy::too_many_arguments)]
 fn add_bench_task_top100_asc(
     bench_group: &mut BenchGroup,
     bench_index: &BenchIndex,
@@ -278,6 +258,7 @@ fn add_bench_task_top100_asc(
     bench_group.register(task_name, move |_| black_box(search_task.run()));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_bench_task_top100_desc(
     bench_group: &mut BenchGroup,
     bench_index: &BenchIndex,
@@ -310,19 +291,6 @@ impl CountSearchTask {
     #[inline(never)]
     pub fn run(&self) -> usize {
         self.searcher.search(&self.query, &Count).unwrap()
-    }
-}
-
-struct DocSetSearchTask {
-    searcher: Searcher,
-    query: RangeQuery,
-}
-
-impl DocSetSearchTask {
-    #[inline(never)]
-    pub fn run(&self) -> usize {
-        let result = self.searcher.search(&self.query, &DocSetCollector).unwrap();
-        result.len()
     }
 }
 
