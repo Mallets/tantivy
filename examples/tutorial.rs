@@ -97,6 +97,24 @@ fn main() -> tantivy::Result<()> {
     println!("  │                    │ inverse document frequency, and field length.   │");
     println!("  └────────────────────┴─────────────────────────────────────────────────┘");
     println!();
+    println!("  {B}Acronyms:{R}");
+    println!("  ┌────────────────────┬─────────────────────────────────────────────────┐");
+    println!("  │ {C}IDF{R}                │ Inverse Document Frequency — measures how rare  │");
+    println!("  │                    │ a term is across all documents.                 │");
+    println!("  ├────────────────────┼─────────────────────────────────────────────────┤");
+    println!("  │ {C}TF{R}                 │ Term Frequency — how often a term appears in a  │");
+    println!("  │                    │ single document.                                │");
+    println!("  ├────────────────────┼─────────────────────────────────────────────────┤");
+    println!("  │ {C}FST{R}                │ Finite State Transducer — compact automaton used│");
+    println!("  │                    │ as the term dictionary for O(key_len) lookups.  │");
+    println!("  ├────────────────────┼─────────────────────────────────────────────────┤");
+    println!("  │ {C}BM25{R}               │ Best Matching 25 — ranking function combining   │");
+    println!("  │                    │ TF, IDF, and document length normalization.     │");
+    println!("  ├────────────────────┼─────────────────────────────────────────────────┤");
+    println!("  │ {C}DocId{R}              │ Document Identifier — segment-local u32 assigned│");
+    println!("  │                    │ sequentially (0, 1, 2, ...) during indexing.    │");
+    println!("  └────────────────────┴─────────────────────────────────────────────────┘");
+    println!();
     println!("  {B}Pipeline:{R}");
     println!();
     println!("  {Y}INGESTION{R}");
@@ -133,12 +151,20 @@ fn main() -> tantivy::Result<()> {
     let samples: &[usize] = &[0, 15];
     for &i in samples {
         let json: serde_json::Value = serde_json::from_str(LINES[i]).unwrap();
-        println!("  {G}[{i:>2}]{R} {}", serde_json::to_string_pretty(&json).unwrap()
-            .lines()
-            .enumerate()
-            .map(|(li, l)| if li == 0 { l.to_string() } else { format!("       {l}") })
-            .collect::<Vec<_>>()
-            .join("\n"));
+        println!(
+            "  {G}[{i:>2}]{R} {}",
+            serde_json::to_string_pretty(&json)
+                .unwrap()
+                .lines()
+                .enumerate()
+                .map(|(li, l)| if li == 0 {
+                    l.to_string()
+                } else {
+                    format!("       {l}")
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
     }
     println!();
 
