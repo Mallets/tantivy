@@ -128,6 +128,20 @@ fn main() -> tantivy::Result<()> {
     println!("    • {C}Fast{R}:    column-oriented for filtering/aggregation (FAST)");
     println!();
 
+    println!("  {B}Sample documents being ingested:{R}");
+    println!();
+    let samples: &[usize] = &[0, 15];
+    for &i in samples {
+        let json: serde_json::Value = serde_json::from_str(LINES[i]).unwrap();
+        println!("  {G}[{i:>2}]{R} {}", serde_json::to_string_pretty(&json).unwrap()
+            .lines()
+            .enumerate()
+            .map(|(li, l)| if li == 0 { l.to_string() } else { format!("       {l}") })
+            .collect::<Vec<_>>()
+            .join("\n"));
+    }
+    println!();
+
     let mut schema_builder = Schema::builder();
 
     let service = schema_builder.add_text_field("service", STRING | STORED);
