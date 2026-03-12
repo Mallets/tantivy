@@ -484,25 +484,69 @@ fn main() -> tantivy::Result<()> {
     sep();
     println!("{B}STEP 7: Search Execution{R}");
     println!();
-    println!("  {B}How a query executes:{R}");
-    println!("    1. {C}Query::weight(){R}  — compute IDF stats across all segments");
-    println!("    2. {C}Weight::scorer(){R}  — for each segment, look up the term dict,");
-    println!("       open the posting list, create a Scorer (DocSet + scoring)");
-    println!("    3. {C}Collector::collect(){R} — iterate the scorer, collect results");
+    println!("  {B}How a query executes (3 phases):{R}");
     println!();
-    println!("  {B}Term → Posting List lookup:{R}");
+    println!("    {C}Phase 1 — Query::weight(){R}");
+    println!("      For every term in the query, the Weight reads the term dictionary");
+    println!("      of each segment to obtain the {C}doc_freq{R} (how many docs contain the");
+    println!("      term). These counts are summed across all segments to compute the");
+    println!("      global {C}IDF{R} = ln(1 + (N - df + 0.5) / (df + 0.5)). The IDF is");
+    println!("      computed once per term and reused for every matching document.");
+    println!();
+    println!("    {C}Phase 2 — Weight::scorer()  (per segment){R}");
+    println!("      For each SegmentReader, the Weight performs these lookups:");
+    println!("        a) {C}Term Dictionary (.term){R} — an FST maps the term bytes to a");
+    println!("           TermOrdinal in O(term_len). The ordinal indexes into an SSTable");
+    println!("           that yields TermInfo = {{doc_freq, postings_range, positions_range}}.");
+    println!("        b) {C}Posting List (.idx){R} — using TermInfo.postings_range, the scorer");
+    println!("           opens the posting list: a delta-encoded, bitpacked sequence of");
+    println!("           DocIds in blocks of 128. The scorer can advance() or next() to");
+    println!("           iterate matching DocIds.");
+    println!("        c) {C}Positions (.pos){R} — for PhraseQueries only. Using");
+    println!("           TermInfo.positions_range, the scorer reads per-doc position");
+    println!("           arrays to verify that terms appear at adjacent positions.");
+    println!("        d) {C}Field Norms (.fieldnorm){R} — the scorer reads the token count");
+    println!("           for the matched field in each doc. This is |D| in BM25, used");
+    println!("           to penalize long documents where the term may be less relevant.");
+    println!("      The result is a Scorer: a DocSet that yields (DocId, score) pairs.");
+    println!();
+    println!("    {C}Phase 3 — Collector::collect(){R}");
+    println!("      The Collector iterates the Scorer. For TopDocs, it maintains a");
+    println!("      BinaryHeap of size K. For Count, it just increments a counter.");
+    println!("      After scoring, if STORED fields are needed, one more lookup occurs:");
+    println!("        e) {C}Doc Store (.store){R} — the DocId indexes into block-compressed");
+    println!("           row storage (LZ4/zstd). The relevant block is decompressed and");
+    println!("           the document's stored fields are deserialized.");
+    println!();
+    println!("  {B}Complete lookup chain for a single term:{R}");
     println!("    ┌────────────────┐   ┌───────────────┐   ┌─────────────────────┐");
     println!(
         "    │ {C}\"error\"{R}        │──▸│ {C}TermInfo{R}      │──▸│ {C}PostingList{R}         │"
     );
     println!("    │ (level field)  │   │ doc_freq: N   │   │ [doc2,3,4,6,7,9..]  │");
     println!("    │                │   │ postings: ..  │   │ delta+bitpacked     │");
+    println!("    └────────────────┘   └───────────────┘   └──────────┬──────────┘");
+    println!("                                                        │");
+    println!("                                                        ▼");
+    println!("    ┌────────────────┐   ┌───────────────┐   ┌─────────────────────┐");
+    println!(
+        "    │ {C}FieldNorms{R}     │   │ {C}BM25 Score{R}   │   │ {C}Doc Store{R}           │"
+    );
+    println!("    │ |D| per doc   │──▸│ IDF·TF·norm   │   │ stored fields out   │");
+    println!("    │ (.fieldnorm)  │   │               │   │ (.store)            │");
     println!("    └────────────────┘   └───────────────┘   └─────────────────────┘");
     println!();
 
     // 7a: TermQuery — single term
     println!("  {Y}7a) TermQuery — Find docs with level=\"error\"{R}");
     sep();
+    println!("    {D}Lookups: term dict (.term) → posting list (.idx) → field norms{R}");
+    println!("    {D}  1. FST lookup: \"error\" in level field → TermOrdinal → TermInfo{R}");
+    println!("    {D}  2. Read posting list from TermInfo.postings_range{R}");
+    println!("    {D}  3. For each DocId: read field norm, compute BM25 score{R}");
+    println!("    {D}  4. TopDocs collector keeps top-K by score in a BinaryHeap{R}");
+    println!("    {D}  5. For results: decompress doc from .store to get JSON{R}");
+    println!();
     let term_error = Term::from_field_text(level, "error");
     let term_query = TermQuery::new(term_error, IndexRecordOption::WithFreqs);
     let top_docs = searcher.search(&term_query, &TopDocs::with_limit(20).order_by_score())?;
@@ -525,6 +569,16 @@ fn main() -> tantivy::Result<()> {
     println!();
     println!("  {Y}7b) BooleanQuery AND — level=\"error\" AND service=\"api\"{R}");
     sep();
+    println!("    {D}Lookups: two independent term dict lookups, then posting intersection{R}");
+    println!("    {D}  1. FST lookup: \"error\" in level field → TermInfo₁{R}");
+    println!("    {D}  2. FST lookup: \"api\" in service field → TermInfo₂{R}");
+    println!("    {D}  3. Open both posting lists from TermInfo₁ and TermInfo₂{R}");
+    println!("    {D}  4. Intersect: advance both iterators, emit DocId only when both match{R}");
+    println!("    {D}     (the shorter list drives — advance the lagging iterator to catch up){R}");
+    println!("    {D}  5. For each intersected DocId: read field norms for both fields,{R}");
+    println!("    {D}     compute BM25 per term, sum scores{R}");
+    println!("    {D}  6. Total file reads: 2× .term, 2× .idx, 1× .fieldnorm, 1× .store{R}");
+    println!();
     let term_api = Term::from_field_text(service, "api");
     let bool_query = BooleanQuery::new(vec![
         (
@@ -544,11 +598,6 @@ fn main() -> tantivy::Result<()> {
 
     println!("    Matching docs: {G}{count}{R}");
     println!();
-    println!("    {D}Boolean AND intersects the two posting lists:{R}");
-    println!("    {D}  level:error  → [d0,d2,d3,d4,d6,d7,...]{R}");
-    println!("    {D}  service:api  → [d15,d16,d17,d18,...]{R}");
-    println!("    {D}  AND result   → intersection of above{R}");
-    println!();
     for (score, doc_address) in &results {
         let doc: TantivyDocument = searcher.doc(*doc_address)?;
         println!("    score={score:.4}  {}", doc.to_json(&schema));
@@ -558,6 +607,18 @@ fn main() -> tantivy::Result<()> {
     println!();
     println!("  {Y}7c) PhraseQuery — \"connection refused\"{R}");
     sep();
+    println!("    {D}Lookups: term dicts + postings + positions — the most expensive query type{R}");
+    println!("    {D}  1. FST lookup: \"connection\" in message field → TermInfo₁{R}");
+    println!("    {D}  2. FST lookup: \"refused\" in message field → TermInfo₂{R}");
+    println!("    {D}  3. Intersect posting lists (.idx) to find docs containing both terms{R}");
+    println!("    {D}  4. For each candidate DocId, read positions from .pos:{R}");
+    println!("    {D}     - positions₁ = positions of \"connection\" in the doc{R}");
+    println!("    {D}     - positions₂ = positions of \"refused\" in the doc{R}");
+    println!("    {D}     - verify ∃ i such that positions₂[j] == positions₁[i] + 1{R}");
+    println!("    {D}     - only docs where terms are adjacent in order survive{R}");
+    println!("    {D}  5. Score surviving docs with BM25 (field norms from .fieldnorm){R}");
+    println!("    {D}  6. Total file reads: 2× .term, 2× .idx, 2× .pos, 1× .fieldnorm, 1× .store{R}");
+    println!();
     let phrase_query = PhraseQuery::new(vec![
         Term::from_field_text(message, "connection"),
         Term::from_field_text(message, "refused"),
@@ -566,10 +627,6 @@ fn main() -> tantivy::Result<()> {
     let count = searcher.search(&phrase_query, &Count)?;
 
     println!("    Matching docs: {G}{count}{R}");
-    println!();
-    println!("    {D}Phrase query uses positions to verify adjacency:{R}");
-    println!("    {D}  \"connection\" at pos 0,  \"refused\" at pos 1 → match{R}");
-    println!("    {D}  Uses the .pos file for each candidate doc from posting intersection{R}");
     println!();
     for (score, doc_address) in results.iter().take(3) {
         let doc: TantivyDocument = searcher.doc(*doc_address)?;
