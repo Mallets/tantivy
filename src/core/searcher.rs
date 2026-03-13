@@ -4,7 +4,7 @@ use std::{fmt, io};
 
 use crate::collector::Collector;
 use crate::core::Executor;
-use crate::index::{SegmentId, SegmentReader};
+use crate::index::{SegmentId, TantivySegmentReader};
 use crate::query::{Bm25StatisticsProvider, EnableScoring, Query};
 use crate::schema::document::DocumentDeserialize;
 use crate::schema::{Schema, Term};
@@ -36,7 +36,7 @@ pub struct SearcherGeneration {
 
 impl SearcherGeneration {
     pub(crate) fn from_segment_readers(
-        segment_readers: &[SegmentReader],
+        segment_readers: &[TantivySegmentReader],
         generation_id: u64,
     ) -> Self {
         let mut segment_id_to_del_opstamp = BTreeMap::new();
@@ -154,12 +154,12 @@ impl Searcher {
     }
 
     /// Return the list of segment readers
-    pub fn segment_readers(&self) -> &[SegmentReader] {
+    pub fn segment_readers(&self) -> &[TantivySegmentReader] {
         &self.inner.segment_readers
     }
 
     /// Returns the segment_reader associated with the given segment_ord
-    pub fn segment_reader(&self, segment_ord: u32) -> &SegmentReader {
+    pub fn segment_reader(&self, segment_ord: u32) -> &TantivySegmentReader {
         &self.inner.segment_readers[segment_ord as usize]
     }
 
@@ -259,7 +259,7 @@ impl From<Arc<SearcherInner>> for Searcher {
 pub(crate) struct SearcherInner {
     schema: Schema,
     index: Index,
-    segment_readers: Vec<SegmentReader>,
+    segment_readers: Vec<TantivySegmentReader>,
     store_readers: Vec<StoreReader>,
     generation: TrackedObject<SearcherGeneration>,
 }
@@ -269,7 +269,7 @@ impl SearcherInner {
     pub(crate) fn new(
         schema: Schema,
         index: Index,
-        segment_readers: Vec<SegmentReader>,
+        segment_readers: Vec<TantivySegmentReader>,
         generation: TrackedObject<SearcherGeneration>,
         doc_store_cache_num_blocks: usize,
     ) -> io::Result<SearcherInner> {
@@ -301,7 +301,7 @@ impl fmt::Debug for Searcher {
         let segment_ids = self
             .segment_readers()
             .iter()
-            .map(SegmentReader::segment_id)
+            .map(TantivySegmentReader::segment_id)
             .collect::<Vec<_>>();
         write!(f, "Searcher({segment_ids:?})")
     }

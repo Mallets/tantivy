@@ -439,7 +439,7 @@ mod tests {
     use crate::time::OffsetDateTime;
     use crate::tokenizer::{PreTokenizedString, Token};
     use crate::{
-        DateTime, Directory, DocAddress, DocSet, Index, IndexWriter, SegmentReader,
+        DateTime, Directory, DocAddress, DocSet, Index, IndexWriter, TantivySegmentReader,
         TantivyDocument, Term, TERMINATED,
     };
 
@@ -871,7 +871,7 @@ mod tests {
         let searcher = reader.searcher();
         let segment_reader = searcher.segment_reader(0u32);
 
-        fn assert_type(reader: &SegmentReader, field: &str, typ: ColumnType) {
+        fn assert_type(reader: &TantivySegmentReader, field: &str, typ: ColumnType) {
             let cols = reader.fast_fields().dynamic_column_handles(field).unwrap();
             assert_eq!(cols.len(), 1, "{field}");
             assert_eq!(cols[0].column_type(), typ, "{field}");
@@ -890,7 +890,7 @@ mod tests {
         assert_type(segment_reader, "json.my_arr", ColumnType::I64);
         assert_type(segment_reader, "json.my_arr.my_key", ColumnType::Str);
 
-        fn assert_empty(reader: &SegmentReader, field: &str) {
+        fn assert_empty(reader: &TantivySegmentReader, field: &str) {
             let cols = reader.fast_fields().dynamic_column_handles(field).unwrap();
             assert_eq!(cols.len(), 0);
         }

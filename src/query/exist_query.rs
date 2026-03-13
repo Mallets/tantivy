@@ -5,13 +5,12 @@ use common::BitSet;
 
 use super::{ConstScorer, EmptyScorer};
 use crate::docset::{DocSet, TERMINATED};
-use crate::index::SegmentReader;
 use crate::query::all_query::AllScorer;
 use crate::query::boost_query::BoostScorer;
 use crate::query::explanation::does_not_match;
 use crate::query::{BitSetDocSet, EnableScoring, Explanation, Query, Scorer, Weight};
 use crate::schema::Type;
-use crate::{DocId, Score, TantivyError};
+use crate::{DocId, Score, SegmentReaderTrait, TantivyError};
 
 /// Query that matches all documents with a non-null value in the specified
 /// field.
@@ -98,7 +97,11 @@ pub struct ExistsWeight {
 }
 
 impl Weight for ExistsWeight {
-    fn scorer(&self, reader: &SegmentReader, boost: Score) -> crate::Result<Box<dyn Scorer>> {
+    fn scorer(
+        &self,
+        reader: &dyn SegmentReaderTrait,
+        boost: Score,
+    ) -> crate::Result<Box<dyn Scorer>> {
         let fast_field_reader = reader.fast_fields();
         let mut column_handles = fast_field_reader.dynamic_column_handles(&self.field_name)?;
         if self.field_type == Type::Json && self.json_subpaths {
@@ -165,7 +168,7 @@ impl Weight for ExistsWeight {
         Ok(Box::new(ConstScorer::new(docset, boost)))
     }
 
-    fn explain(&self, reader: &SegmentReader, doc: DocId) -> crate::Result<Explanation> {
+    fn explain(&self, reader: &dyn SegmentReaderTrait, doc: DocId) -> crate::Result<Explanation> {
         let mut scorer = self.scorer(reader, 1.0)?;
         if scorer.seek(doc) != doc {
             return Err(does_not_match(doc));

@@ -244,17 +244,24 @@ impl DeleteCursor {
 mod tests {
 
     use super::{DeleteOperation, DeleteQueue};
-    use crate::index::SegmentReader;
     use crate::query::{Explanation, Scorer, Weight};
-    use crate::{DocId, Score};
+    use crate::{DocId, Score, SegmentReaderTrait};
 
     struct DummyWeight;
     impl Weight for DummyWeight {
-        fn scorer(&self, _reader: &SegmentReader, _boost: Score) -> crate::Result<Box<dyn Scorer>> {
+        fn scorer(
+            &self,
+            _reader: &dyn SegmentReaderTrait,
+            _boost: Score,
+        ) -> crate::Result<Box<dyn Scorer>> {
             Err(crate::TantivyError::InternalError("dummy impl".to_owned()))
         }
 
-        fn explain(&self, _reader: &SegmentReader, _doc: DocId) -> crate::Result<Explanation> {
+        fn explain(
+            &self,
+            _reader: &dyn SegmentReaderTrait,
+            _doc: DocId,
+        ) -> crate::Result<Explanation> {
             Err(crate::TantivyError::InternalError("dummy impl".to_owned()))
         }
     }

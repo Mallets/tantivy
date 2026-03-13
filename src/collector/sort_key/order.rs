@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::collector::{SegmentSortKeyComputer, SortKeyComputer};
 use crate::schema::{OwnedValue, Schema};
-use crate::{DocId, Order, Score};
+use crate::{DocId, Order, Score, SegmentReaderTrait};
 
 fn compare_owned_value<const NULLS_FIRST: bool>(lhs: &OwnedValue, rhs: &OwnedValue) -> Ordering {
     match (lhs, rhs) {
@@ -115,7 +115,8 @@ impl Comparator<OwnedValue> for NaturalComparator {
 pub struct ReverseComparator;
 
 impl<T> Comparator<T> for ReverseComparator
-where NaturalComparator: Comparator<T>
+where
+    NaturalComparator: Comparator<T>,
 {
     #[inline(always)]
     fn compare(&self, lhs: &T, rhs: &T) -> Ordering {
@@ -136,7 +137,8 @@ where NaturalComparator: Comparator<T>
 pub struct ReverseNoneIsLowerComparator;
 
 impl<T> Comparator<Option<T>> for ReverseNoneIsLowerComparator
-where ReverseComparator: Comparator<T>
+where
+    ReverseComparator: Comparator<T>,
 {
     #[inline(always)]
     fn compare(&self, lhs_opt: &Option<T>, rhs_opt: &Option<T>) -> Ordering {
@@ -207,7 +209,8 @@ impl Comparator<OwnedValue> for ReverseNoneIsLowerComparator {
 pub struct NaturalNoneIsHigherComparator;
 
 impl<T> Comparator<Option<T>> for NaturalNoneIsHigherComparator
-where NaturalComparator: Comparator<T>
+where
+    NaturalComparator: Comparator<T>,
 {
     #[inline(always)]
     fn compare(&self, lhs_opt: &Option<T>, rhs_opt: &Option<T>) -> Ordering {
@@ -430,7 +433,7 @@ where
 
     fn segment_sort_key_computer(
         &self,
-        segment_reader: &crate::SegmentReader,
+        segment_reader: &dyn SegmentReaderTrait,
     ) -> crate::Result<Self::Child> {
         let child = self.0.segment_sort_key_computer(segment_reader)?;
         Ok(SegmentSortKeyComputerWithComparator {
@@ -468,7 +471,7 @@ where
 
     fn segment_sort_key_computer(
         &self,
-        segment_reader: &crate::SegmentReader,
+        segment_reader: &dyn SegmentReaderTrait,
     ) -> crate::Result<Self::Child> {
         let child = self.0.segment_sort_key_computer(segment_reader)?;
         Ok(SegmentSortKeyComputerWithComparator {

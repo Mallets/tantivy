@@ -1,9 +1,8 @@
 use crate::docset::{DocSet, COLLECT_BLOCK_BUFFER_LEN, TERMINATED};
-use crate::index::SegmentReader;
 use crate::query::boost_query::BoostScorer;
 use crate::query::explanation::does_not_match;
 use crate::query::{EnableScoring, Explanation, Query, Scorer, Weight};
-use crate::{DocId, Score};
+use crate::{DocId, Score, SegmentReaderTrait};
 
 /// Query that matches all of the documents.
 ///
@@ -21,7 +20,11 @@ impl Query for AllQuery {
 pub struct AllWeight;
 
 impl Weight for AllWeight {
-    fn scorer(&self, reader: &SegmentReader, boost: Score) -> crate::Result<Box<dyn Scorer>> {
+    fn scorer(
+        &self,
+        reader: &dyn SegmentReaderTrait,
+        boost: Score,
+    ) -> crate::Result<Box<dyn Scorer>> {
         let all_scorer = AllScorer::new(reader.max_doc());
         if boost != 1.0 {
             Ok(Box::new(BoostScorer::new(all_scorer, boost)))
@@ -30,7 +33,7 @@ impl Weight for AllWeight {
         }
     }
 
-    fn explain(&self, reader: &SegmentReader, doc: DocId) -> crate::Result<Explanation> {
+    fn explain(&self, reader: &dyn SegmentReaderTrait, doc: DocId) -> crate::Result<Explanation> {
         if doc >= reader.max_doc() {
             return Err(does_not_match(doc));
         }

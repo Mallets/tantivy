@@ -5,13 +5,12 @@ use common::bounds::{map_bound, BoundsRange};
 use common::BitSet;
 
 use super::range_query_fastfield::FastFieldRangeWeight;
-use crate::index::SegmentReader;
 use crate::query::explanation::does_not_match;
 use crate::query::range_query::is_type_valid_for_fastfield_range_query;
 use crate::query::{BitSetDocSet, ConstScorer, EnableScoring, Explanation, Query, Scorer, Weight};
 use crate::schema::{Field, IndexRecordOption, Term, Type};
 use crate::termdict::{TermDictionary, TermStreamer};
-use crate::{DocId, Score};
+use crate::{DocId, Score, SegmentReaderTrait};
 
 /// `RangeQuery` matches all documents that have at least one term within a defined range.
 ///
@@ -212,7 +211,11 @@ impl InvertedIndexRangeWeight {
 }
 
 impl Weight for InvertedIndexRangeWeight {
-    fn scorer(&self, reader: &SegmentReader, boost: Score) -> crate::Result<Box<dyn Scorer>> {
+    fn scorer(
+        &self,
+        reader: &dyn SegmentReaderTrait,
+        boost: Score,
+    ) -> crate::Result<Box<dyn Scorer>> {
         let max_doc = reader.max_doc();
         let mut doc_bitset = BitSet::with_max_value(max_doc);
 
@@ -245,7 +248,7 @@ impl Weight for InvertedIndexRangeWeight {
         Ok(Box::new(ConstScorer::new(doc_bitset, boost)))
     }
 
-    fn explain(&self, reader: &SegmentReader, doc: DocId) -> crate::Result<Explanation> {
+    fn explain(&self, reader: &dyn SegmentReaderTrait, doc: DocId) -> crate::Result<Explanation> {
         let mut scorer = self.scorer(reader, 1.0)?;
         if scorer.seek(doc) != doc {
             return Err(does_not_match(doc));

@@ -8,8 +8,7 @@ use crate::aggregation::agg_data::{
     build_aggregations_data_from_req, build_segment_agg_collectors_root, AggregationsSegmentCtx,
 };
 use crate::collector::{Collector, SegmentCollector};
-use crate::index::SegmentReader;
-use crate::{DocId, SegmentOrdinal, TantivyError};
+use crate::{DocId, SegmentOrdinal, SegmentReaderTrait, TantivyError};
 
 /// The default max bucket count, before the aggregation fails.
 pub const DEFAULT_BUCKET_LIMIT: u32 = 65000;
@@ -66,7 +65,7 @@ impl Collector for DistributedAggregationCollector {
     fn for_segment(
         &self,
         segment_local_id: crate::SegmentOrdinal,
-        reader: &crate::SegmentReader,
+        reader: &dyn SegmentReaderTrait,
     ) -> crate::Result<Self::Child> {
         AggregationSegmentCollector::from_agg_req_and_reader(
             &self.agg,
@@ -96,7 +95,7 @@ impl Collector for AggregationCollector {
     fn for_segment(
         &self,
         segment_local_id: crate::SegmentOrdinal,
-        reader: &crate::SegmentReader,
+        reader: &dyn SegmentReaderTrait,
     ) -> crate::Result<Self::Child> {
         AggregationSegmentCollector::from_agg_req_and_reader(
             &self.agg,
@@ -145,7 +144,7 @@ impl AggregationSegmentCollector {
     /// reader. Also includes validation, e.g. checking field types and existence.
     pub fn from_agg_req_and_reader(
         agg: &Aggregations,
-        reader: &SegmentReader,
+        reader: &dyn SegmentReaderTrait,
         segment_ordinal: SegmentOrdinal,
         context: &AggContextParams,
     ) -> crate::Result<Self> {

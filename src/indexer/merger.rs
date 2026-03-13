@@ -12,7 +12,7 @@ use crate::docset::{DocSet, TERMINATED};
 use crate::error::DataCorruption;
 use crate::fastfield::AliveBitSet;
 use crate::fieldnorm::{FieldNormReader, FieldNormReaders, FieldNormsSerializer, FieldNormsWriter};
-use crate::index::{Segment, SegmentComponent, SegmentReader};
+use crate::index::{Segment, SegmentComponent, TantivySegmentReader};
 use crate::indexer::doc_id_mapping::{MappingType, SegmentDocIdMapping};
 use crate::indexer::SegmentSerializer;
 use crate::postings::{InvertedIndexSerializer, Postings, SegmentPostings};
@@ -27,7 +27,7 @@ use crate::{DocAddress, DocId, InvertedIndexReader};
 pub const MAX_DOC_LIMIT: u32 = 1 << 31;
 
 fn estimate_total_num_tokens_in_single_segment(
-    reader: &SegmentReader,
+    reader: &TantivySegmentReader,
     field: Field,
 ) -> crate::Result<u64> {
     // There are no deletes. We can simply use the exact value saved into the posting list.
@@ -68,7 +68,7 @@ fn estimate_total_num_tokens_in_single_segment(
     Ok((segment_num_tokens as f64 * ratio) as u64)
 }
 
-fn estimate_total_num_tokens(readers: &[SegmentReader], field: Field) -> crate::Result<u64> {
+fn estimate_total_num_tokens(readers: &[TantivySegmentReader], field: Field) -> crate::Result<u64> {
     let mut total_num_tokens: u64 = 0;
     for reader in readers {
         total_num_tokens += estimate_total_num_tokens_in_single_segment(reader, field)?;
@@ -78,7 +78,7 @@ fn estimate_total_num_tokens(readers: &[SegmentReader], field: Field) -> crate::
 
 pub struct IndexMerger {
     schema: Schema,
-    pub(crate) readers: Vec<SegmentReader>,
+    pub(crate) readers: Vec<TantivySegmentReader>,
     max_doc: u32,
 }
 
@@ -171,7 +171,7 @@ impl IndexMerger {
         for (segment, new_alive_bitset_opt) in segments.iter().zip(alive_bitset_opt) {
             if segment.meta().num_docs() > 0 {
                 let reader =
-                    SegmentReader::open_with_custom_alive_set(segment, new_alive_bitset_opt)?;
+                    TantivySegmentReader::open_with_custom_alive_set(segment, new_alive_bitset_opt)?;
                 readers.push(reader);
             }
         }
@@ -262,7 +262,7 @@ impl IndexMerger {
                 }),
         );
 
-        let has_deletes: bool = self.readers.iter().any(SegmentReader::has_deletes);
+        let has_deletes: bool = self.readers.iter().any(TantivySegmentReader::has_deletes);
         let mapping_type = if has_deletes {
             MappingType::StackedWithDeletes
         } else {

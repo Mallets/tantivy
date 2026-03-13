@@ -121,6 +121,9 @@ pub trait SegmentReaderTrait {
 
     /// Summarize total space usage of this segment.
     fn space_usage(&self) -> io::Result<SegmentSpaceUsage>;
+
+    /// Clone this reader into an `Arc<dyn SegmentReaderTrait>`.
+    fn clone_arc(&self) -> Arc<dyn SegmentReaderTrait>;
 }
 
 /// Entry point to access all of the datastructures of the `Segment`
@@ -134,7 +137,7 @@ pub trait SegmentReaderTrait {
 /// The segment reader has a very low memory footprint,
 /// as close to all of the memory data is mmapped.
 #[derive(Clone)]
-pub struct SegmentReader {
+pub struct TantivySegmentReader {
     inv_idx_reader_cache: Arc<RwLock<HashMap<Field, Arc<InvertedIndexReader>>>>,
 
     segment_id: SegmentId,
@@ -154,7 +157,7 @@ pub struct SegmentReader {
     schema: Schema,
 }
 
-impl SegmentReader {
+impl TantivySegmentReader {
     /// Returns the highest document id ever attributed in
     /// this segment + 1.
     pub fn max_doc(&self) -> DocId {
@@ -245,7 +248,7 @@ impl SegmentReader {
     }
 
     /// Open a new segment for reading.
-    pub fn open(segment: &Segment) -> crate::Result<SegmentReader> {
+    pub fn open(segment: &Segment) -> crate::Result<TantivySegmentReader> {
         Self::open_with_custom_alive_set(segment, None)
     }
 
@@ -253,7 +256,7 @@ impl SegmentReader {
     pub fn open_with_custom_alive_set(
         segment: &Segment,
         custom_bitset: Option<AliveBitSet>,
-    ) -> crate::Result<SegmentReader> {
+    ) -> crate::Result<TantivySegmentReader> {
         let termdict_file = segment.open_read(SegmentComponent::Terms)?;
         let termdict_composite = CompositeFile::open(&termdict_file)?;
 
@@ -295,7 +298,7 @@ impl SegmentReader {
             .map(|alive_bitset| alive_bitset.num_alive_docs() as u32)
             .unwrap_or(max_doc);
 
-        Ok(SegmentReader {
+        Ok(TantivySegmentReader {
             inv_idx_reader_cache: Default::default(),
             num_docs,
             max_doc,
@@ -554,9 +557,14 @@ impl SegmentReader {
                 .unwrap_or_default(),
         ))
     }
+
+    /// Clone this reader into an `Arc<dyn SegmentReaderTrait>`.
+    pub fn clone_arc(&self) -> Arc<dyn SegmentReaderTrait> {
+        Arc::new(self.clone())
+    }
 }
 
-impl SegmentReaderTrait for SegmentReader {
+impl SegmentReaderTrait for TantivySegmentReader {
     fn max_doc(&self) -> DocId {
         self.max_doc()
     }
@@ -638,6 +646,10 @@ impl SegmentReaderTrait for SegmentReader {
 
     fn space_usage(&self) -> io::Result<SegmentSpaceUsage> {
         self.space_usage()
+    }
+
+    fn clone_arc(&self) -> Arc<dyn SegmentReaderTrait> {
+        self.clone_arc()
     }
 }
 
@@ -748,7 +760,7 @@ fn intersect_alive_bitset(
     }
 }
 
-impl fmt::Debug for SegmentReader {
+impl fmt::Debug for TantivySegmentReader {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "SegmentReader({:?})", self.segment_id)
     }

@@ -1,12 +1,11 @@
 use super::PhraseScorer;
 use crate::fieldnorm::FieldNormReader;
-use crate::index::SegmentReader;
 use crate::postings::SegmentPostings;
 use crate::query::bm25::Bm25Weight;
 use crate::query::explanation::does_not_match;
 use crate::query::{EmptyScorer, Explanation, Scorer, Weight};
 use crate::schema::{IndexRecordOption, Term};
-use crate::{DocId, DocSet, Score};
+use crate::{DocId, DocSet, Score, SegmentReaderTrait};
 
 pub struct PhraseWeight {
     phrase_terms: Vec<(usize, Term)>,
@@ -29,7 +28,7 @@ impl PhraseWeight {
         }
     }
 
-    fn fieldnorm_reader(&self, reader: &SegmentReader) -> crate::Result<FieldNormReader> {
+    fn fieldnorm_reader(&self, reader: &dyn SegmentReaderTrait) -> crate::Result<FieldNormReader> {
         let field = self.phrase_terms[0].1.field();
         if self.similarity_weight_opt.is_some() {
             if let Some(fieldnorm_reader) = reader.fieldnorms_readers().get_field(field)? {
@@ -41,7 +40,7 @@ impl PhraseWeight {
 
     pub(crate) fn phrase_scorer(
         &self,
-        reader: &SegmentReader,
+        reader: &dyn SegmentReaderTrait,
         boost: Score,
     ) -> crate::Result<Option<PhraseScorer<SegmentPostings>>> {
         let similarity_weight_opt = self
@@ -74,7 +73,11 @@ impl PhraseWeight {
 }
 
 impl Weight for PhraseWeight {
-    fn scorer(&self, reader: &SegmentReader, boost: Score) -> crate::Result<Box<dyn Scorer>> {
+    fn scorer(
+        &self,
+        reader: &dyn SegmentReaderTrait,
+        boost: Score,
+    ) -> crate::Result<Box<dyn Scorer>> {
         if let Some(scorer) = self.phrase_scorer(reader, boost)? {
             Ok(Box::new(scorer))
         } else {
@@ -82,7 +85,7 @@ impl Weight for PhraseWeight {
         }
     }
 
-    fn explain(&self, reader: &SegmentReader, doc: DocId) -> crate::Result<Explanation> {
+    fn explain(&self, reader: &dyn SegmentReaderTrait, doc: DocId) -> crate::Result<Explanation> {
         let scorer_opt = self.phrase_scorer(reader, 1.0)?;
         if scorer_opt.is_none() {
             return Err(does_not_match(doc));

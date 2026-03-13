@@ -11,7 +11,7 @@ use columnar::Column;
 // ---
 // Importing tantivy...
 use tantivy::collector::{Collector, SegmentCollector};
-use tantivy::index::SegmentReader;
+use tantivy::index::SegmentReaderTrait;
 use tantivy::query::QueryParser;
 use tantivy::schema::{Schema, FAST, INDEXED, TEXT};
 use tantivy::{doc, Index, IndexWriter, Score};
@@ -70,7 +70,7 @@ impl Collector for StatsCollector {
     fn for_segment(
         &self,
         _segment_local_id: u32,
-        segment_reader: &SegmentReader,
+        segment_reader: &dyn SegmentReaderTrait,
     ) -> tantivy::Result<StatsSegmentCollector> {
         let fast_field_reader = segment_reader.fast_fields().u64(&self.field)?;
         Ok(StatsSegmentCollector {

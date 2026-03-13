@@ -13,7 +13,7 @@ use columnar::{BytesColumn, Column, DynamicColumn, HasAssociatedColumnType};
 
 use crate::collector::{Collector, SegmentCollector};
 use crate::schema::Schema;
-use crate::{DocId, Score, SegmentReader};
+use crate::{DocId, Score, SegmentReaderTrait};
 
 /// The `FilterCollector` filters docs using a fast field value and a predicate.
 ///
@@ -114,7 +114,7 @@ where
     fn for_segment(
         &self,
         segment_local_id: u32,
-        segment_reader: &SegmentReader,
+        segment_reader: &dyn SegmentReaderTrait,
     ) -> crate::Result<Self::Child> {
         let column_opt = segment_reader.fast_fields().column_opt(&self.field)?;
 
@@ -289,7 +289,7 @@ where
     fn for_segment(
         &self,
         segment_local_id: u32,
-        segment_reader: &SegmentReader,
+        segment_reader: &dyn SegmentReaderTrait,
     ) -> crate::Result<Self::Child> {
         let column_opt = segment_reader.fast_fields().bytes(&self.field)?;
 

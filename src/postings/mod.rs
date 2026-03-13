@@ -47,7 +47,7 @@ pub(crate) mod tests {
     use super::{InvertedIndexSerializer, Postings};
     use crate::docset::{DocSet, TERMINATED};
     use crate::fieldnorm::FieldNormReader;
-    use crate::index::{Index, SegmentComponent, SegmentReader};
+    use crate::index::{Index, SegmentComponent, TantivySegmentReader};
     use crate::indexer::operation::AddOperation;
     use crate::indexer::SegmentWriter;
     use crate::query::Scorer;
@@ -259,7 +259,7 @@ pub(crate) mod tests {
             segment_writer.finalize()?;
         }
         {
-            let segment_reader = SegmentReader::open(&segment)?;
+            let segment_reader = TantivySegmentReader::open(&segment)?;
             {
                 let fieldnorm_reader = segment_reader.get_fieldnorms_reader(text_field)?;
                 assert_eq!(fieldnorm_reader.fieldnorm(0), 8 + 5);

@@ -648,7 +648,7 @@ impl SegmentUpdater {
                                     merge_operation.segment_ids(),
                                     advance_deletes_err
                                 );
-                                const { assert!(!cfg!(test), "Merge failed.") };
+                                assert!(!cfg!(test), "Merge failed.");
 
                                 // ... cancel merge
                                 // `merge_operations` are tracked. As it is dropped, the

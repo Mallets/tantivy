@@ -1,14 +1,13 @@
 use super::term_scorer::TermScorer;
 use crate::docset::{DocSet, COLLECT_BLOCK_BUFFER_LEN};
 use crate::fieldnorm::FieldNormReader;
-use crate::index::SegmentReader;
 use crate::postings::SegmentPostings;
 use crate::query::bm25::Bm25Weight;
 use crate::query::explanation::does_not_match;
 use crate::query::weight::{for_each_docset_buffered, for_each_scorer};
 use crate::query::{AllScorer, AllWeight, EmptyScorer, Explanation, Scorer, Weight};
 use crate::schema::IndexRecordOption;
-use crate::{DocId, Score, TantivyError, Term};
+use crate::{DocId, Score, SegmentReaderTrait, TantivyError, Term};
 
 pub struct TermWeight {
     term: Term,
@@ -34,11 +33,15 @@ impl TermOrEmptyOrAllScorer {
 }
 
 impl Weight for TermWeight {
-    fn scorer(&self, reader: &SegmentReader, boost: Score) -> crate::Result<Box<dyn Scorer>> {
+    fn scorer(
+        &self,
+        reader: &dyn SegmentReaderTrait,
+        boost: Score,
+    ) -> crate::Result<Box<dyn Scorer>> {
         Ok(self.specialized_scorer(reader, boost)?.into_boxed_scorer())
     }
 
-    fn explain(&self, reader: &SegmentReader, doc: DocId) -> crate::Result<Explanation> {
+    fn explain(&self, reader: &dyn SegmentReaderTrait, doc: DocId) -> crate::Result<Explanation> {
         match self.specialized_scorer(reader, 1.0)? {
             TermOrEmptyOrAllScorer::TermScorer(mut term_scorer) => {
                 if term_scorer.doc() > doc || term_scorer.seek(doc) != doc {
@@ -53,7 +56,7 @@ impl Weight for TermWeight {
         }
     }
 
-    fn count(&self, reader: &SegmentReader) -> crate::Result<u32> {
+    fn count(&self, reader: &dyn SegmentReaderTrait) -> crate::Result<u32> {
         if let Some(alive_bitset) = reader.alive_bitset() {
             Ok(self.scorer(reader, 1.0)?.count(alive_bitset))
         } else {
@@ -68,7 +71,7 @@ impl Weight for TermWeight {
     /// `DocSet` and push the scored documents to the collector.
     fn for_each(
         &self,
-        reader: &SegmentReader,
+        reader: &dyn SegmentReaderTrait,
         callback: &mut dyn FnMut(DocId, Score),
     ) -> crate::Result<()> {
         match self.specialized_scorer(reader, 1.0)? {
@@ -87,7 +90,7 @@ impl Weight for TermWeight {
     /// `DocSet` and push the scored documents to the collector.
     fn for_each_no_score(
         &self,
-        reader: &SegmentReader,
+        reader: &dyn SegmentReaderTrait,
         callback: &mut dyn FnMut(&[DocId]),
     ) -> crate::Result<()> {
         match self.specialized_scorer(reader, 1.0)? {
@@ -118,7 +121,7 @@ impl Weight for TermWeight {
     fn for_each_pruning(
         &self,
         threshold: Score,
-        reader: &SegmentReader,
+        reader: &dyn SegmentReaderTrait,
         callback: &mut dyn FnMut(DocId, Score) -> Score,
     ) -> crate::Result<()> {
         let specialized_scorer = self.specialized_scorer(reader, 1.0)?;
@@ -166,7 +169,7 @@ impl TermWeight {
     #[cfg(test)]
     pub(crate) fn term_scorer_for_test(
         &self,
-        reader: &SegmentReader,
+        reader: &dyn SegmentReaderTrait,
         boost: Score,
     ) -> crate::Result<Option<TermScorer>> {
         let scorer = self.specialized_scorer(reader, boost)?;
@@ -178,7 +181,7 @@ impl TermWeight {
 
     fn specialized_scorer(
         &self,
-        reader: &SegmentReader,
+        reader: &dyn SegmentReaderTrait,
         boost: Score,
     ) -> crate::Result<TermOrEmptyOrAllScorer> {
         let field = self.term.field();
@@ -206,7 +209,10 @@ impl TermWeight {
         )))
     }
 
-    fn fieldnorm_reader(&self, segment_reader: &SegmentReader) -> crate::Result<FieldNormReader> {
+    fn fieldnorm_reader(
+        &self,
+        segment_reader: &dyn SegmentReaderTrait,
+    ) -> crate::Result<FieldNormReader> {
         if self.scoring_enabled {
             if let Some(field_norm_reader) = segment_reader
                 .fieldnorms_readers()

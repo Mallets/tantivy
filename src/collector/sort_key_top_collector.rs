@@ -4,7 +4,7 @@ use crate::collector::sort_key::{Comparator, SegmentSortKeyComputer, SortKeyComp
 use crate::collector::{Collector, SegmentCollector, TopNComputer};
 use crate::query::Weight;
 use crate::schema::Schema;
-use crate::{DocAddress, DocId, Result, Score, SegmentReader};
+use crate::{DocAddress, DocId, Result, Score, SegmentReaderTrait};
 
 pub(crate) struct TopBySortKeyCollector<TSortKeyComputer> {
     sort_key_computer: TSortKeyComputer,
@@ -21,7 +21,8 @@ impl<TSortKeyComputer> TopBySortKeyCollector<TSortKeyComputer> {
 }
 
 impl<TSortKeyComputer> Collector for TopBySortKeyCollector<TSortKeyComputer>
-where TSortKeyComputer: SortKeyComputer + Send + Sync + 'static
+where
+    TSortKeyComputer: SortKeyComputer + Send + Sync + 'static,
 {
     type Fruit = Vec<(TSortKeyComputer::SortKey, DocAddress)>;
 
@@ -32,7 +33,11 @@ where TSortKeyComputer: SortKeyComputer + Send + Sync + 'static
         self.sort_key_computer.check_schema(schema)
     }
 
-    fn for_segment(&self, segment_ord: u32, segment_reader: &SegmentReader) -> Result<Self::Child> {
+    fn for_segment(
+        &self,
+        segment_ord: u32,
+        segment_reader: &dyn SegmentReaderTrait,
+    ) -> Result<Self::Child> {
         let segment_sort_key_computer = self
             .sort_key_computer
             .segment_sort_key_computer(segment_reader)?;
@@ -63,7 +68,7 @@ where TSortKeyComputer: SortKeyComputer + Send + Sync + 'static
         &self,
         weight: &dyn Weight,
         segment_ord: u32,
-        reader: &SegmentReader,
+        reader: &dyn SegmentReaderTrait,
     ) -> crate::Result<Vec<(TSortKeyComputer::SortKey, DocAddress)>> {
         let k = self.doc_range.end;
         let docs = self

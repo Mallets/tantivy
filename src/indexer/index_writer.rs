@@ -12,7 +12,7 @@ use super::{AddBatch, AddBatchReceiver, AddBatchSender, PreparedCommit};
 use crate::directory::{DirectoryLock, GarbageCollectionResult, TerminatingWrite};
 use crate::error::TantivyError;
 use crate::fastfield::write_alive_bitset;
-use crate::index::{Index, Segment, SegmentComponent, SegmentId, SegmentMeta, SegmentReader};
+use crate::index::{Index, Segment, SegmentComponent, SegmentId, SegmentMeta, TantivySegmentReader};
 use crate::indexer::delete_queue::{DeleteCursor, DeleteQueue};
 use crate::indexer::doc_opstamp_mapping::DocToOpstampMapping;
 use crate::indexer::index_writer_status::IndexWriterStatus;
@@ -94,7 +94,7 @@ pub struct IndexWriter<D: Document = TantivyDocument> {
 
 fn compute_deleted_bitset(
     alive_bitset: &mut BitSet,
-    segment_reader: &SegmentReader,
+    segment_reader: &TantivySegmentReader,
     delete_cursor: &mut DeleteCursor,
     doc_opstamps: &DocToOpstampMapping,
     target_opstamp: Opstamp,
@@ -143,7 +143,7 @@ pub fn advance_deletes(
         return Ok(());
     }
 
-    let segment_reader = SegmentReader::open(&segment)?;
+    let segment_reader = TantivySegmentReader::open(&segment)?;
 
     let max_doc = segment_reader.max_doc();
     let mut alive_bitset: BitSet = match segment_entry.alive_bitset() {
@@ -243,7 +243,7 @@ fn apply_deletes(
         .max()
         .expect("Empty DocOpstamp is forbidden");
 
-    let segment_reader = SegmentReader::open(segment)?;
+    let segment_reader = TantivySegmentReader::open(segment)?;
     let doc_to_opstamps = DocToOpstampMapping::WithMap(doc_opstamps);
 
     let max_doc = segment.meta().max_doc();

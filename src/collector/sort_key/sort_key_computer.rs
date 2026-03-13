@@ -4,7 +4,7 @@ use crate::collector::sort_key::{Comparator, NaturalComparator};
 use crate::collector::sort_key_top_collector::TopBySortKeySegmentCollector;
 use crate::collector::{default_collect_segment_impl, SegmentCollector as _, TopNComputer};
 use crate::schema::Schema;
-use crate::{DocAddress, DocId, Result, Score, SegmentReader};
+use crate::{DocAddress, DocId, Result, Score, SegmentReaderTrait};
 
 /// A `SegmentSortKeyComputer` makes it possible to modify the default score
 /// for a given document belonging to a specific segment.
@@ -119,7 +119,7 @@ pub trait SortKeyComputer: Sync {
         &self,
         k: usize,
         weight: &dyn crate::query::Weight,
-        reader: &crate::SegmentReader,
+        reader: &dyn SegmentReaderTrait,
         segment_ord: u32,
     ) -> crate::Result<Vec<(Self::SortKey, DocAddress)>> {
         let with_scoring = self.requires_scoring();
@@ -135,7 +135,10 @@ pub trait SortKeyComputer: Sync {
     }
 
     /// Builds a child sort key computer for a specific segment.
-    fn segment_sort_key_computer(&self, segment_reader: &SegmentReader) -> Result<Self::Child>;
+    fn segment_sort_key_computer(
+        &self,
+        segment_reader: &dyn SegmentReaderTrait,
+    ) -> Result<Self::Child>;
 }
 
 impl<HeadSortKeyComputer, TailSortKeyComputer> SortKeyComputer
@@ -156,7 +159,10 @@ where
         (self.0.comparator(), self.1.comparator())
     }
 
-    fn segment_sort_key_computer(&self, segment_reader: &SegmentReader) -> Result<Self::Child> {
+    fn segment_sort_key_computer(
+        &self,
+        segment_reader: &dyn SegmentReaderTrait,
+    ) -> Result<Self::Child> {
         Ok((
             self.0.segment_sort_key_computer(segment_reader)?,
             self.1.segment_sort_key_computer(segment_reader)?,
@@ -357,7 +363,10 @@ where
         )
     }
 
-    fn segment_sort_key_computer(&self, segment_reader: &SegmentReader) -> Result<Self::Child> {
+    fn segment_sort_key_computer(
+        &self,
+        segment_reader: &dyn SegmentReaderTrait,
+    ) -> Result<Self::Child> {
         let sort_key_computer1 = self.0.segment_sort_key_computer(segment_reader)?;
         let sort_key_computer2 = self.1.segment_sort_key_computer(segment_reader)?;
         let sort_key_computer3 = self.2.segment_sort_key_computer(segment_reader)?;
@@ -420,7 +429,10 @@ where
         SortKeyComputer4::Comparator,
     );
 
-    fn segment_sort_key_computer(&self, segment_reader: &SegmentReader) -> Result<Self::Child> {
+    fn segment_sort_key_computer(
+        &self,
+        segment_reader: &dyn SegmentReaderTrait,
+    ) -> Result<Self::Child> {
         let sort_key_computer1 = self.0.segment_sort_key_computer(segment_reader)?;
         let sort_key_computer2 = self.1.segment_sort_key_computer(segment_reader)?;
         let sort_key_computer3 = self.2.segment_sort_key_computer(segment_reader)?;
@@ -454,7 +466,7 @@ where
 
 impl<F, SegmentF, TSortKey> SortKeyComputer for F
 where
-    F: 'static + Send + Sync + Fn(&SegmentReader) -> SegmentF,
+    F: 'static + Send + Sync + Fn(&dyn SegmentReaderTrait) -> SegmentF,
     SegmentF: 'static + FnMut(DocId) -> TSortKey,
     TSortKey: 'static + PartialOrd + Clone + Send + Sync + std::fmt::Debug,
 {
@@ -462,7 +474,10 @@ where
     type Child = SegmentF;
     type Comparator = NaturalComparator;
 
-    fn segment_sort_key_computer(&self, segment_reader: &SegmentReader) -> Result<Self::Child> {
+    fn segment_sort_key_computer(
+        &self,
+        segment_reader: &dyn SegmentReaderTrait,
+    ) -> Result<Self::Child> {
         Ok((self)(segment_reader))
     }
 }
@@ -494,7 +509,7 @@ mod tests {
 
     use crate::collector::{SegmentSortKeyComputer, SortKeyComputer};
     use crate::schema::Schema;
-    use crate::{DocId, Index, Order, SegmentReader};
+    use crate::{DocId, Index, Order, SegmentReaderTrait};
 
     fn build_test_index() -> Index {
         let schema = Schema::builder().build();
@@ -509,10 +524,11 @@ mod tests {
 
     #[test]
     fn test_lazy_score_computer() {
-        let score_computer_primary = |_segment_reader: &SegmentReader| |_doc: DocId| 200u32;
+        let score_computer_primary =
+            |_segment_reader: &dyn SegmentReaderTrait| |_doc: DocId| 200u32;
         let call_count = Arc::new(AtomicUsize::new(0));
         let call_count_clone = call_count.clone();
-        let score_computer_secondary = move |_segment_reader: &SegmentReader| {
+        let score_computer_secondary = move |_segment_reader: &dyn SegmentReaderTrait| {
             let call_count_new_clone = call_count_clone.clone();
             move |_doc: DocId| {
                 call_count_new_clone.fetch_add(1, AtomicOrdering::SeqCst);
@@ -572,10 +588,11 @@ mod tests {
 
     #[test]
     fn test_lazy_score_computer_dynamic_ordering() {
-        let score_computer_primary = |_segment_reader: &SegmentReader| |_doc: DocId| 200u32;
+        let score_computer_primary =
+            |_segment_reader: &dyn SegmentReaderTrait| |_doc: DocId| 200u32;
         let call_count = Arc::new(AtomicUsize::new(0));
         let call_count_clone = call_count.clone();
-        let score_computer_secondary = move |_segment_reader: &SegmentReader| {
+        let score_computer_secondary = move |_segment_reader: &dyn SegmentReaderTrait| {
             let call_count_new_clone = call_count_clone.clone();
             move |_doc: DocId| {
                 call_count_new_clone.fetch_add(1, AtomicOrdering::SeqCst);

@@ -1,9 +1,8 @@
 use super::Scorer;
 use crate::docset::TERMINATED;
-use crate::index::SegmentReader;
 use crate::query::explanation::does_not_match;
 use crate::query::{EnableScoring, Explanation, Query, Weight};
-use crate::{DocId, DocSet, Score, Searcher};
+use crate::{DocId, DocSet, Score, Searcher, SegmentReaderTrait};
 
 /// `EmptyQuery` is a dummy `Query` in which no document matches.
 ///
@@ -26,11 +25,15 @@ impl Query for EmptyQuery {
 /// It is useful for tests and handling edge cases.
 pub struct EmptyWeight;
 impl Weight for EmptyWeight {
-    fn scorer(&self, _reader: &SegmentReader, _boost: Score) -> crate::Result<Box<dyn Scorer>> {
+    fn scorer(
+        &self,
+        _reader: &dyn SegmentReaderTrait,
+        _boost: Score,
+    ) -> crate::Result<Box<dyn Scorer>> {
         Ok(Box::new(EmptyScorer))
     }
 
-    fn explain(&self, _reader: &SegmentReader, doc: DocId) -> crate::Result<Explanation> {
+    fn explain(&self, _reader: &dyn SegmentReaderTrait, doc: DocId) -> crate::Result<Explanation> {
         Err(does_not_match(doc))
     }
 }

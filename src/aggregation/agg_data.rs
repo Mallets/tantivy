@@ -26,7 +26,7 @@ use crate::aggregation::segment_agg_result::{
     GenericSegmentAggregationResultsCollector, SegmentAggregationCollector,
 };
 use crate::aggregation::{f64_to_fastfield_u64, AggContextParams, Key};
-use crate::{SegmentOrdinal, SegmentReader};
+use crate::{SegmentOrdinal, SegmentReaderTrait};
 
 #[derive(Default)]
 /// Datastructure holding all request data for executing aggregations on a segment.
@@ -469,7 +469,7 @@ impl AggKind {
 /// Build AggregationsData by walking the request tree.
 pub(crate) fn build_aggregations_data_from_req(
     aggs: &Aggregations,
-    reader: &SegmentReader,
+    reader: &dyn SegmentReaderTrait,
     segment_ordinal: SegmentOrdinal,
     context: AggContextParams,
 ) -> crate::Result<AggregationsSegmentCtx> {
@@ -489,7 +489,7 @@ pub(crate) fn build_aggregations_data_from_req(
 fn build_nodes(
     agg_name: &str,
     req: &Aggregation,
-    reader: &SegmentReader,
+    reader: &dyn SegmentReaderTrait,
     segment_ordinal: SegmentOrdinal,
     data: &mut AggregationsSegmentCtx,
     is_top_level: bool,
@@ -542,8 +542,11 @@ fn build_nodes(
             }])
         }
         DateHistogram(date_req) => {
-            let (accessor, field_type) =
-                get_ff_reader(reader, &date_req.field, Some(&[ColumnType::DateTime]))?;
+            let (accessor, field_type) = get_ff_reader(
+                reader,
+                &date_req.field,
+                Some(&[ColumnType::DateTime]),
+            )?;
             // Convert to histogram request, normalize to ns precision
             let mut histo_req = date_req.to_histogram_req()?;
             histo_req.normalize_date_time();
@@ -681,7 +684,13 @@ fn build_nodes(
             let accessors: Vec<(Column<u64>, ColumnType)> = top_hits
                 .field_names()
                 .iter()
-                .map(|field| get_ff_reader(reader, field, Some(get_numeric_or_date_column_types())))
+                .map(|field| {
+                    get_ff_reader(
+                        reader,
+                        field,
+                        Some(get_numeric_or_date_column_types()),
+                    )
+                })
                 .collect::<crate::Result<_>>()?;
 
             let value_accessors = top_hits
@@ -702,7 +711,8 @@ fn build_nodes(
                 name: agg_name.to_string(),
                 req: top_hits.clone(),
             });
-            let children = build_children(&req.sub_aggregation, reader, segment_ordinal, data)?;
+            let children =
+                build_children(&req.sub_aggregation, reader, segment_ordinal, data)?;
             Ok(vec![AggRefNode {
                 kind: AggKind::TopHits,
                 idx_in_req_data,
@@ -728,7 +738,7 @@ fn build_nodes(
             let idx_in_req_data = data.push_filter_req_data(FilterAggReqData {
                 name: agg_name.to_string(),
                 req: filter_req.clone(),
-                segment_reader: reader.clone(),
+                segment_reader: reader.clone_arc(),
                 evaluator,
                 matching_docs_buffer,
                 is_top_level,
@@ -745,7 +755,7 @@ fn build_nodes(
 
 fn build_children(
     aggs: &Aggregations,
-    reader: &SegmentReader,
+    reader: &dyn SegmentReaderTrait,
     segment_ordinal: SegmentOrdinal,
     data: &mut AggregationsSegmentCtx,
 ) -> crate::Result<Vec<AggRefNode>> {
@@ -764,7 +774,7 @@ fn build_children(
 }
 
 fn get_term_agg_accessors(
-    reader: &SegmentReader,
+    reader: &dyn SegmentReaderTrait,
     field_name: &str,
     missing: &Option<Key>,
 ) -> crate::Result<Vec<(Column<u64>, ColumnType)>> {
@@ -817,7 +827,7 @@ fn build_terms_or_cardinality_nodes(
     agg_name: &str,
     field_name: &str,
     missing: &Option<Key>,
-    reader: &SegmentReader,
+    reader: &dyn SegmentReaderTrait,
     segment_ordinal: SegmentOrdinal,
     data: &mut AggregationsSegmentCtx,
     sub_aggs: &Aggregations,
