@@ -550,6 +550,7 @@ impl BinarySerializable for BlockAddrBlockMetadata {
 }
 
 impl FixedSize for BlockAddrBlockMetadata {
+    #[allow(clippy::identity_op)]
     const SIZE_IN_BYTES: usize = u64::SIZE_IN_BYTES
         + BlockStartAddr::SIZE_IN_BYTES
         + 2 * u32::SIZE_IN_BYTES

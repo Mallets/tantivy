@@ -1,9 +1,9 @@
-#![feature(test)]
+#![cfg_attr(feature = "unstable", feature(test))]
 
-extern crate test;
-
-#[cfg(test)]
+#[cfg(all(test, feature = "unstable"))]
 mod tests {
+    extern crate test;
+
     use rand::rng;
     use rand::seq::IteratorRandom;
     use tantivy_bitpacker::{BitPacker, BitUnpacker, BlockedBitpacker};
@@ -14,7 +14,6 @@ mod tests {
         let mut bitpacker = BitPacker::new();
         let mut buffer = Vec::new();
         for _ in 0..num_els {
-            // the values do not matter.
             bitpacker.write(0u64, bit_width, &mut buffer).unwrap();
             bitpacker.flush(&mut buffer).unwrap();
         }

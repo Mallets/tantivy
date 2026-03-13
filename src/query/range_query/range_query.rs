@@ -548,7 +548,7 @@ mod tests {
         let searcher = reader.searcher();
         assert_eq!(searcher.segment_readers().len(), 1);
 
-        let get_num_hits = |query| {
+        let get_num_hits = |query: Box<dyn Query>| {
             let (_top_docs, count) = searcher
                 .search(&query, &(TopDocs::with_limit(10).order_by_score(), Count))
                 .unwrap();

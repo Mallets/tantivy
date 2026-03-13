@@ -234,6 +234,7 @@ fn add_bench_task_count(
     bench_group.register(task_name, move |_| black_box(search_task.run()));
 }
 
+#[allow(dead_code)]
 fn add_bench_task_docset(
     bench_group: &mut BenchGroup,
     bench_index: &BenchIndex,
@@ -255,6 +256,7 @@ fn add_bench_task_docset(
     bench_group.register(task_name, move |_| black_box(search_task.run()));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_bench_task_top100_asc(
     bench_group: &mut BenchGroup,
     bench_index: &BenchIndex,
@@ -278,6 +280,7 @@ fn add_bench_task_top100_asc(
     bench_group.register(task_name, move |_| black_box(search_task.run()));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_bench_task_top100_desc(
     bench_group: &mut BenchGroup,
     bench_index: &BenchIndex,
@@ -313,11 +316,13 @@ impl CountSearchTask {
     }
 }
 
+#[allow(dead_code)]
 struct DocSetSearchTask {
     searcher: Searcher,
     query: RangeQuery,
 }
 
+#[allow(dead_code)]
 impl DocSetSearchTask {
     #[inline(never)]
     pub fn run(&self) -> usize {

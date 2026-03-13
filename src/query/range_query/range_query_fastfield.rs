@@ -518,7 +518,7 @@ mod tests {
     use crate::collector::{Count, TopDocs};
     use crate::fastfield::FastValue;
     use crate::query::range_query::range_query_fastfield::FastFieldRangeWeight;
-    use crate::query::{QueryParser, RangeQuery, Weight};
+    use crate::query::{Query, QueryParser, RangeQuery, Weight};
     use crate::schema::{
         DateOptions, Field, NumericOptions, Schema, SchemaBuilder, FAST, INDEXED, STORED, STRING,
         TEXT,
@@ -1271,7 +1271,7 @@ mod tests {
 
         let mut rng: StdRng = StdRng::from_seed([1u8; 32]);
 
-        let get_num_hits = |query| searcher.search(&query, &Count).unwrap();
+        let get_num_hits = |query: Box<dyn Query>| searcher.search(&query, &Count).unwrap();
         let query_from_text = |text: &str| {
             QueryParser::for_index(&index, vec![])
                 .parse_query(text)
@@ -1616,7 +1616,7 @@ pub(crate) mod ip_range_tests {
         let reader = index.reader().unwrap();
         let searcher = reader.searcher();
 
-        let get_num_hits = |query| searcher.search(&query, &Count).unwrap();
+        let get_num_hits = |query: Box<dyn Query>| searcher.search(&query, &Count).unwrap();
         let query_from_text = |text: &str| {
             QueryParser::for_index(&index, vec![])
                 .parse_query(text)

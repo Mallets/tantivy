@@ -18,6 +18,111 @@ use crate::store::StoreReader;
 use crate::termdict::TermDictionary;
 use crate::{DocId, Opstamp};
 
+/// Trait exposing the read-only accessors of a [`SegmentReader`].
+pub trait SegmentReaderTrait {
+    /// Returns the highest document id ever attributed in
+    /// this segment + 1.
+    fn max_doc(&self) -> DocId;
+
+    /// Returns the number of alive documents.
+    /// Deleted documents are not counted.
+    fn num_docs(&self) -> DocId;
+
+    /// Returns the schema of the index this segment belongs to.
+    fn schema(&self) -> &Schema;
+
+    /// Return the number of documents that have been
+    /// deleted in the segment.
+    fn num_deleted_docs(&self) -> usize;
+
+    /// Returns true if some of the documents of the segment have been deleted.
+    fn has_deletes(&self) -> bool;
+
+    /// Accessor to a segment's fast field reader given a field.
+    fn fast_fields(&self) -> &FastFieldReaders;
+
+    /// Accessor to the `FacetReader` associated with a given `Field`.
+    fn facet_reader(&self, field_name: &str) -> crate::Result<FacetReader>;
+
+    /// Accessor to the segment's `Field norms`'s reader.
+    ///
+    /// Field norms are the length (in tokens) of the fields.
+    /// It is used in the computation of the [TfIdf](https://fulmicoton.gitbooks.io/tantivy-doc/content/tfidf.html).
+    ///
+    /// They are simply stored as a fast field, serialized in
+    /// the `.fieldnorm` file of the segment.
+    fn get_fieldnorms_reader(&self, field: Field) -> crate::Result<FieldNormReader>;
+
+    #[doc(hidden)]
+    fn fieldnorms_readers(&self) -> &FieldNormReaders;
+
+    /// Accessor to the segment's [`StoreReader`](crate::store::StoreReader).
+    ///
+    /// `cache_num_blocks` sets the number of decompressed blocks to be cached in an LRU.
+    /// The size of blocks is configurable, this should be reflected in the
+    fn get_store_reader(&self, cache_num_blocks: usize) -> io::Result<StoreReader>;
+
+    /// Open a new segment for reading.
+    fn open(segment: &Segment) -> crate::Result<Self>
+    where
+        Self: Sized;
+
+    /// Open a new segment for reading with a custom alive set.
+    fn open_with_custom_alive_set(
+        segment: &Segment,
+        custom_bitset: Option<AliveBitSet>,
+    ) -> crate::Result<Self>
+    where
+        Self: Sized;
+
+    /// Returns a field reader associated with the field given in argument.
+    /// If the field was not present in the index during indexing time,
+    /// the InvertedIndexReader is empty.
+    ///
+    /// The field reader is in charge of iterating through the
+    /// term dictionary associated with a specific field,
+    /// and opening the posting list associated with any term.
+    ///
+    /// If the field is not marked as index, a warning is logged and an empty `InvertedIndexReader`
+    /// is returned.
+    /// Similarly, if the field is marked as indexed but no term has been indexed for the given
+    /// index, an empty `InvertedIndexReader` is returned (but no warning is logged).
+    fn inverted_index(&self, field: Field) -> crate::Result<Arc<InvertedIndexReader>>;
+
+    /// Returns the list of fields that have been indexed in the segment.
+    /// The field list includes the field defined in the schema as well as the fields
+    /// that have been indexed as a part of a JSON field.
+    /// The returned field name is the full field name, including the name of the JSON field.
+    ///
+    /// The returned field names can be used in queries.
+    ///
+    /// Notice: If your data contains JSON fields this is **very expensive**, as it requires
+    /// browsing through the inverted index term dictionary and the columnar field dictionary.
+    ///
+    /// Disclaimer: Some fields may not be listed here. For instance, if the schema contains a json
+    /// field that is not indexed nor a fast field but is stored, it is possible for the field
+    /// to not be listed.
+    fn fields_metadata(&self) -> crate::Result<Vec<FieldMetadata>>;
+
+    /// Returns the segment id
+    fn segment_id(&self) -> SegmentId;
+
+    /// Returns the delete opstamp
+    fn delete_opstamp(&self) -> Option<Opstamp>;
+
+    /// Returns the bitset representing the alive `DocId`s.
+    fn alive_bitset(&self) -> Option<&AliveBitSet>;
+
+    /// Returns true if the `doc` is marked as deleted.
+    fn is_deleted(&self, doc: DocId) -> bool;
+
+    /// Returns an iterator that will iterate over the alive document ids
+    fn doc_ids_alive(&self) -> Box<dyn Iterator<Item = DocId> + Send + '_>;
+
+    /// Summarize total space usage of this segment.
+    fn space_usage(&self) -> io::Result<SegmentSpaceUsage>;
+}
+
 /// Entry point to access all of the datastructures of the `Segment`
 ///
 /// - term dictionary
@@ -69,8 +174,8 @@ impl SegmentReader {
 
     /// Return the number of documents that have been
     /// deleted in the segment.
-    pub fn num_deleted_docs(&self) -> DocId {
-        self.max_doc - self.num_docs
+    pub fn num_deleted_docs(&self) -> usize {
+        (self.max_doc - self.num_docs) as usize
     }
 
     /// Returns true if some of the documents of the segment have been deleted.
@@ -134,7 +239,7 @@ impl SegmentReader {
     /// Accessor to the segment's [`StoreReader`](crate::store::StoreReader).
     ///
     /// `cache_num_blocks` sets the number of decompressed blocks to be cached in an LRU.
-    /// The size of blocks is configurable, this should be reflexted in the
+    /// The size of blocks is configurable, this should be reflected in the
     pub fn get_store_reader(&self, cache_num_blocks: usize) -> io::Result<StoreReader> {
         StoreReader::open(self.store_file.clone(), cache_num_blocks)
     }
@@ -144,7 +249,7 @@ impl SegmentReader {
         Self::open_with_custom_alive_set(segment, None)
     }
 
-    /// Open a new segment for reading.
+    /// Open a new segment for reading with a custom alive set.
     pub fn open_with_custom_alive_set(
         segment: &Segment,
         custom_bitset: Option<AliveBitSet>,
@@ -239,10 +344,6 @@ impl SegmentReader {
         let postings_file_opt = self.postings_composite.open_read(field);
 
         if postings_file_opt.is_none() || record_option_opt.is_none() {
-            // no documents in the segment contained this field.
-            // As a result, no data is associated with the inverted index.
-            //
-            // Returns an empty inverted index.
             let record_option = record_option_opt.unwrap_or(IndexRecordOption::Basic);
             return Ok(Arc::new(InvertedIndexReader::empty(record_option)));
         }
@@ -315,19 +416,15 @@ impl SegmentReader {
                     let inv_index = self.inverted_index(field)?;
                     let encoded_fields_in_index = inv_index.list_encoded_json_fields()?;
                     let mut build_path = |field_name: &str, mut json_path: String| {
-                        // In this case we need to map the potential fast field to the field name
-                        // accepted by the query parser.
                         let create_canonical =
                             !field_entry.is_expand_dots_enabled() && json_path.contains('.');
                         if create_canonical {
-                            // Without expand dots enabled dots need to be escaped.
                             let escaped_json_path = json_path.replace('.', "\\.");
                             let full_path = format!("{field_name}.{escaped_json_path}");
                             let full_path_unescaped = format!("{}.{}", field_name, &json_path);
                             map_to_canonical.insert(full_path_unescaped, full_path.to_string());
                             full_path
                         } else {
-                            // With expand dots enabled, we can use '.' instead of '\u{1}'.
                             json_path_sep_to_dot(&mut json_path);
                             format!("{field_name}.{json_path}")
                         }
@@ -338,11 +435,6 @@ impl SegmentReader {
                         .sum();
                     indexed_fields.extend(encoded_fields_in_index.into_iter().map(|field_space| {
                         let field_name = build_path(&field_name, field_space.field_name);
-                        // It is complex to attribute the exact amount of bytes required by specific
-                        // field in the json field. Instead, as a proxy, we
-                        // attribute the total amount of bytes for the entire json field,
-                        // proportionally to the number of terms in each
-                        // fields.
                         let term_dictionary_size = (term_dictionary_json_field_num_bytes
                             * field_space.num_terms)
                             .checked_div(total_num_terms)
@@ -352,7 +444,6 @@ impl SegmentReader {
                             positions_size: Some(field_space.positions_size),
                             term_dictionary_size: Some(ByteCount::from(term_dictionary_size)),
                             fast_size: None,
-                            // The stored flag will be set at the end of this function!
                             stored: field_entry.is_stored(),
                             field_name,
                             typ: field_space.field_type,
@@ -380,7 +471,6 @@ impl SegmentReader {
                     indexed_fields.push(FieldMetadata {
                         field_name: field_name.to_string(),
                         typ: field_entry.field_type().value_type(),
-                        // The stored flag will be set at the end of this function!
                         stored: field_entry.is_stored(),
                         fast_size: None,
                         term_dictionary_size: Some(term_dictionary_size),
@@ -396,8 +486,6 @@ impl SegmentReader {
             .iter_columns()?
             .map(|(mut field_name, handle)| {
                 json_path_sep_to_dot(&mut field_name);
-                // map to canonical path, to avoid similar but different entries.
-                // Eventually we should just accept '.' separated for all cases.
                 let field_name = map_to_canonical
                     .get(&field_name)
                     .unwrap_or(&field_name)
@@ -434,8 +522,7 @@ impl SegmentReader {
         self.alive_bitset_opt.as_ref()
     }
 
-    /// Returns true if the `doc` is marked
-    /// as deleted.
+    /// Returns true if the `doc` is marked as deleted.
     pub fn is_deleted(&self, doc: DocId) -> bool {
         self.alive_bitset()
             .map(|alive_bitset| alive_bitset.is_deleted(doc))
@@ -466,6 +553,91 @@ impl SegmentReader {
                 .map(AliveBitSet::space_usage)
                 .unwrap_or_default(),
         ))
+    }
+}
+
+impl SegmentReaderTrait for SegmentReader {
+    fn max_doc(&self) -> DocId {
+        self.max_doc()
+    }
+
+    fn num_docs(&self) -> DocId {
+        self.num_docs()
+    }
+
+    fn schema(&self) -> &Schema {
+        self.schema()
+    }
+
+    fn num_deleted_docs(&self) -> usize {
+        self.num_deleted_docs()
+    }
+
+    fn has_deletes(&self) -> bool {
+        self.has_deletes()
+    }
+
+    fn fast_fields(&self) -> &FastFieldReaders {
+        self.fast_fields()
+    }
+
+    fn facet_reader(&self, field_name: &str) -> crate::Result<FacetReader> {
+        self.facet_reader(field_name)
+    }
+
+    fn get_fieldnorms_reader(&self, field: Field) -> crate::Result<FieldNormReader> {
+        self.get_fieldnorms_reader(field)
+    }
+
+    fn fieldnorms_readers(&self) -> &FieldNormReaders {
+        self.fieldnorms_readers()
+    }
+
+    fn get_store_reader(&self, cache_num_blocks: usize) -> io::Result<StoreReader> {
+        self.get_store_reader(cache_num_blocks)
+    }
+
+    fn open(segment: &Segment) -> crate::Result<Self> {
+        Self::open(segment)
+    }
+
+    fn open_with_custom_alive_set(
+        segment: &Segment,
+        custom_bitset: Option<AliveBitSet>,
+    ) -> crate::Result<Self> {
+        Self::open_with_custom_alive_set(segment, custom_bitset)
+    }
+
+    fn inverted_index(&self, field: Field) -> crate::Result<Arc<InvertedIndexReader>> {
+        self.inverted_index(field)
+    }
+
+    fn fields_metadata(&self) -> crate::Result<Vec<FieldMetadata>> {
+        self.fields_metadata()
+    }
+
+    fn segment_id(&self) -> SegmentId {
+        self.segment_id()
+    }
+
+    fn delete_opstamp(&self) -> Option<Opstamp> {
+        self.delete_opstamp()
+    }
+
+    fn alive_bitset(&self) -> Option<&AliveBitSet> {
+        self.alive_bitset()
+    }
+
+    fn is_deleted(&self, doc: DocId) -> bool {
+        self.is_deleted(doc)
+    }
+
+    fn doc_ids_alive(&self) -> Box<dyn Iterator<Item = DocId> + Send + '_> {
+        self.doc_ids_alive()
+    }
+
+    fn space_usage(&self) -> io::Result<SegmentSpaceUsage> {
+        self.space_usage()
     }
 }
 
