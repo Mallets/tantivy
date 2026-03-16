@@ -26,7 +26,7 @@ use crate::aggregation::segment_agg_result::{
     GenericSegmentAggregationResultsCollector, SegmentAggregationCollector,
 };
 use crate::aggregation::{f64_to_fastfield_u64, AggContextParams, Key};
-use crate::{SegmentOrdinal, SegmentReaderTrait};
+use crate::{SegmentOrdinal, SegmentReader};
 
 #[derive(Default)]
 /// Datastructure holding all request data for executing aggregations on a segment.
@@ -469,7 +469,7 @@ impl AggKind {
 /// Build AggregationsData by walking the request tree.
 pub(crate) fn build_aggregations_data_from_req(
     aggs: &Aggregations,
-    reader: &dyn SegmentReaderTrait,
+    reader: &dyn SegmentReader,
     segment_ordinal: SegmentOrdinal,
     context: AggContextParams,
 ) -> crate::Result<AggregationsSegmentCtx> {
@@ -489,7 +489,7 @@ pub(crate) fn build_aggregations_data_from_req(
 fn build_nodes(
     agg_name: &str,
     req: &Aggregation,
-    reader: &dyn SegmentReaderTrait,
+    reader: &dyn SegmentReader,
     segment_ordinal: SegmentOrdinal,
     data: &mut AggregationsSegmentCtx,
     is_top_level: bool,
@@ -755,7 +755,7 @@ fn build_nodes(
 
 fn build_children(
     aggs: &Aggregations,
-    reader: &dyn SegmentReaderTrait,
+    reader: &dyn SegmentReader,
     segment_ordinal: SegmentOrdinal,
     data: &mut AggregationsSegmentCtx,
 ) -> crate::Result<Vec<AggRefNode>> {
@@ -774,7 +774,7 @@ fn build_children(
 }
 
 fn get_term_agg_accessors(
-    reader: &dyn SegmentReaderTrait,
+    reader: &dyn SegmentReader,
     field_name: &str,
     missing: &Option<Key>,
 ) -> crate::Result<Vec<(Column<u64>, ColumnType)>> {
@@ -827,7 +827,7 @@ fn build_terms_or_cardinality_nodes(
     agg_name: &str,
     field_name: &str,
     missing: &Option<Key>,
-    reader: &dyn SegmentReaderTrait,
+    reader: &dyn SegmentReader,
     segment_ordinal: SegmentOrdinal,
     data: &mut AggregationsSegmentCtx,
     sub_aggs: &Aggregations,

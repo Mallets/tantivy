@@ -6,7 +6,7 @@ use std::ops::Bound;
 use crate::collector::{Collector, SegmentCollector};
 use crate::fastfield::FacetReader;
 use crate::schema::Facet;
-use crate::{DocId, Score, SegmentOrdinal, SegmentReaderTrait};
+use crate::{DocId, Score, SegmentOrdinal, SegmentReader};
 
 struct Hit<'a> {
     count: u64,
@@ -267,7 +267,7 @@ impl Collector for FacetCollector {
     fn for_segment(
         &self,
         _: SegmentOrdinal,
-        reader: &dyn SegmentReaderTrait,
+        reader: &dyn SegmentReader,
     ) -> crate::Result<FacetSegmentCollector> {
         let facet_reader = reader.facet_reader(&self.field_name)?;
         let facet_dict = facet_reader.facet_dict();

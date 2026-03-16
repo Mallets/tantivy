@@ -4,7 +4,7 @@ use crate::collector::sort_key::{Comparator, SegmentSortKeyComputer, SortKeyComp
 use crate::collector::{Collector, SegmentCollector, TopNComputer};
 use crate::query::Weight;
 use crate::schema::Schema;
-use crate::{DocAddress, DocId, Result, Score, SegmentReaderTrait};
+use crate::{DocAddress, DocId, Result, Score, SegmentReader};
 
 pub(crate) struct TopBySortKeyCollector<TSortKeyComputer> {
     sort_key_computer: TSortKeyComputer,
@@ -36,7 +36,7 @@ where
     fn for_segment(
         &self,
         segment_ord: u32,
-        segment_reader: &dyn SegmentReaderTrait,
+        segment_reader: &dyn SegmentReader,
     ) -> Result<Self::Child> {
         let segment_sort_key_computer = self
             .sort_key_computer
@@ -68,7 +68,7 @@ where
         &self,
         weight: &dyn Weight,
         segment_ord: u32,
-        reader: &dyn SegmentReaderTrait,
+        reader: &dyn SegmentReader,
     ) -> crate::Result<Vec<(TSortKeyComputer::SortKey, DocAddress)>> {
         let k = self.doc_range.end;
         let docs = self

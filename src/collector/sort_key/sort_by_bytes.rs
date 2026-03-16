@@ -3,7 +3,7 @@ use columnar::BytesColumn;
 use crate::collector::sort_key::NaturalComparator;
 use crate::collector::{SegmentSortKeyComputer, SortKeyComputer};
 use crate::termdict::TermOrdinal;
-use crate::{DocId, Score, SegmentReaderTrait};
+use crate::{DocId, Score, SegmentReader};
 
 /// Sort by the first value of a bytes column.
 ///
@@ -32,7 +32,7 @@ impl SortKeyComputer for SortByBytes {
 
     fn segment_sort_key_computer(
         &self,
-        segment_reader: &dyn SegmentReaderTrait,
+        segment_reader: &dyn SegmentReader,
     ) -> crate::Result<Self::Child> {
         let bytes_column_opt = segment_reader.fast_fields().bytes(&self.column_name)?;
         Ok(ByBytesColumnSegmentSortKeyComputer { bytes_column_opt })

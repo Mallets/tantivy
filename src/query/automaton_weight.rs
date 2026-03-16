@@ -9,7 +9,7 @@ use crate::postings::TermInfo;
 use crate::query::{BitSetDocSet, ConstScorer, Explanation, Scorer, Weight};
 use crate::schema::{Field, IndexRecordOption};
 use crate::termdict::{TermDictionary, TermStreamer};
-use crate::{DocId, Score, SegmentReaderTrait, TantivyError};
+use crate::{DocId, Score, SegmentReader, TantivyError};
 
 /// A weight struct for Fuzzy Term and Regex Queries
 pub struct AutomatonWeight<A> {
@@ -68,7 +68,7 @@ where
     /// Returns the term infos that match the automaton
     pub fn get_match_term_infos(
         &self,
-        reader: &dyn SegmentReaderTrait,
+        reader: &dyn SegmentReader,
     ) -> crate::Result<Vec<TermInfo>> {
         let inverted_index = reader.inverted_index(self.field)?;
         let term_dict = inverted_index.terms();
@@ -88,7 +88,7 @@ where
 {
     fn scorer(
         &self,
-        reader: &dyn SegmentReaderTrait,
+        reader: &dyn SegmentReader,
         boost: Score,
     ) -> crate::Result<Box<dyn Scorer>> {
         let max_doc = reader.max_doc();
@@ -116,7 +116,7 @@ where
         Ok(Box::new(const_scorer))
     }
 
-    fn explain(&self, reader: &dyn SegmentReaderTrait, doc: DocId) -> crate::Result<Explanation> {
+    fn explain(&self, reader: &dyn SegmentReader, doc: DocId) -> crate::Result<Explanation> {
         let mut scorer = self.scorer(reader, 1.0)?;
         if scorer.seek(doc) == doc {
             Ok(Explanation::new("AutomatonScorer", 1.0))

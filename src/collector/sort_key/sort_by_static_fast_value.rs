@@ -5,7 +5,7 @@ use columnar::Column;
 use crate::collector::sort_key::NaturalComparator;
 use crate::collector::{SegmentSortKeyComputer, SortKeyComputer};
 use crate::fastfield::{FastFieldNotAvailableError, FastValue};
-use crate::{DocId, Score, SegmentReaderTrait};
+use crate::{DocId, Score, SegmentReader};
 
 /// Sorts by a fast value (u64, i64, f64, bool).
 ///
@@ -61,7 +61,7 @@ impl<T: FastValue> SortKeyComputer for SortByStaticFastValue<T> {
 
     fn segment_sort_key_computer(
         &self,
-        segment_reader: &dyn SegmentReaderTrait,
+        segment_reader: &dyn SegmentReader,
     ) -> crate::Result<Self::Child> {
         let sort_column_opt = segment_reader.fast_fields().u64_lenient(&self.field)?;
         let (sort_column, _sort_column_type) =

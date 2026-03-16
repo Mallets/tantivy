@@ -3,7 +3,7 @@ use std::fmt;
 use crate::docset::{SeekDangerResult, COLLECT_BLOCK_BUFFER_LEN};
 use crate::fastfield::AliveBitSet;
 use crate::query::{EnableScoring, Explanation, Query, Scorer, Weight};
-use crate::{DocId, DocSet, Score, SegmentReaderTrait, Term};
+use crate::{DocId, DocSet, Score, SegmentReader, Term};
 
 /// `BoostQuery` is a wrapper over a query used to boost its score.
 ///
@@ -69,13 +69,13 @@ impl BoostWeight {
 impl Weight for BoostWeight {
     fn scorer(
         &self,
-        reader: &dyn SegmentReaderTrait,
+        reader: &dyn SegmentReader,
         boost: Score,
     ) -> crate::Result<Box<dyn Scorer>> {
         self.weight.scorer(reader, boost * self.boost)
     }
 
-    fn explain(&self, reader: &dyn SegmentReaderTrait, doc: u32) -> crate::Result<Explanation> {
+    fn explain(&self, reader: &dyn SegmentReader, doc: u32) -> crate::Result<Explanation> {
         let underlying_explanation = self.weight.explain(reader, doc)?;
         let score = underlying_explanation.value() * self.boost;
         let mut explanation =
@@ -84,7 +84,7 @@ impl Weight for BoostWeight {
         Ok(explanation)
     }
 
-    fn count(&self, reader: &dyn SegmentReaderTrait) -> crate::Result<u32> {
+    fn count(&self, reader: &dyn SegmentReader) -> crate::Result<u32> {
         self.weight.count(reader)
     }
 }

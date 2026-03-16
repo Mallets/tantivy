@@ -1,6 +1,6 @@
 use super::Collector;
 use crate::collector::SegmentCollector;
-use crate::{DocId, Score, SegmentOrdinal, SegmentReaderTrait};
+use crate::{DocId, Score, SegmentOrdinal, SegmentReader};
 
 /// `CountCollector` collector only counts how many
 /// documents match the query.
@@ -43,7 +43,7 @@ impl Collector for Count {
     fn for_segment(
         &self,
         _: SegmentOrdinal,
-        _: &dyn SegmentReaderTrait,
+        _: &dyn SegmentReader,
     ) -> crate::Result<SegmentCountCollector> {
         Ok(SegmentCountCollector::default())
     }

@@ -19,7 +19,7 @@ use crate::termdict::TermDictionary;
 use crate::{DocId, Opstamp};
 
 /// Trait exposing the read-only accessors of a [`SegmentReader`].
-pub trait SegmentReaderTrait {
+pub trait SegmentReader {
     /// Returns the highest document id ever attributed in
     /// this segment + 1.
     fn max_doc(&self) -> DocId;
@@ -123,7 +123,7 @@ pub trait SegmentReaderTrait {
     fn space_usage(&self) -> io::Result<SegmentSpaceUsage>;
 
     /// Clone this reader into an `Arc<dyn SegmentReaderTrait>`.
-    fn clone_arc(&self) -> Arc<dyn SegmentReaderTrait>;
+    fn clone_arc(&self) -> Arc<dyn SegmentReader>;
 }
 
 /// Entry point to access all of the datastructures of the `Segment`
@@ -559,12 +559,12 @@ impl TantivySegmentReader {
     }
 
     /// Clone this reader into an `Arc<dyn SegmentReaderTrait>`.
-    pub fn clone_arc(&self) -> Arc<dyn SegmentReaderTrait> {
+    pub fn clone_arc(&self) -> Arc<dyn SegmentReader> {
         Arc::new(self.clone())
     }
 }
 
-impl SegmentReaderTrait for TantivySegmentReader {
+impl SegmentReader for TantivySegmentReader {
     fn max_doc(&self) -> DocId {
         self.max_doc()
     }
@@ -648,7 +648,7 @@ impl SegmentReaderTrait for TantivySegmentReader {
         self.space_usage()
     }
 
-    fn clone_arc(&self) -> Arc<dyn SegmentReaderTrait> {
+    fn clone_arc(&self) -> Arc<dyn SegmentReader> {
         self.clone_arc()
     }
 }

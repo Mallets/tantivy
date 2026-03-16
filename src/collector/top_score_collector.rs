@@ -13,7 +13,7 @@ use crate::collector::sort_key_top_collector::TopBySortKeyCollector;
 use crate::collector::top_collector::ComparableDoc;
 use crate::collector::{SegmentSortKeyComputer, SortKeyComputer};
 use crate::fastfield::FastValue;
-use crate::{DocAddress, DocId, Order, Score, SegmentReaderTrait};
+use crate::{DocAddress, DocId, Order, Score, SegmentReader};
 
 /// The `TopDocs` collector keeps track of the top `K` documents
 /// sorted by their score.
@@ -442,7 +442,7 @@ pub struct TweakScoreFn<F>(F);
 
 impl<F, TTweakScoreSortKeyFn, TSortKey> SortKeyComputer for TweakScoreFn<F>
 where
-    F: 'static + Send + Sync + Fn(&dyn SegmentReaderTrait) -> TTweakScoreSortKeyFn,
+    F: 'static + Send + Sync + Fn(&dyn SegmentReader) -> TTweakScoreSortKeyFn,
     TTweakScoreSortKeyFn: 'static + Fn(DocId, Score) -> TSortKey,
     TweakScoreSegmentSortKeyComputer<TTweakScoreSortKeyFn>:
         SegmentSortKeyComputer<SortKey = TSortKey, SegmentSortKey = TSortKey>,
@@ -458,7 +458,7 @@ where
 
     fn segment_sort_key_computer(
         &self,
-        segment_reader: &dyn SegmentReaderTrait,
+        segment_reader: &dyn SegmentReader,
     ) -> crate::Result<Self::Child> {
         Ok({
             TweakScoreSegmentSortKeyComputer {
@@ -711,7 +711,7 @@ mod tests {
     use crate::time::OffsetDateTime;
     use crate::{
         assert_nearly_equals, DateTime, DocAddress, DocId, Index, IndexWriter, Order, Score,
-        SegmentReaderTrait,
+        SegmentReader,
     };
 
     fn make_index() -> crate::Result<Index> {
@@ -1526,7 +1526,7 @@ mod tests {
         let text_query = query_parser.parse_query("droopy tax")?;
         let collector = TopDocs::with_limit(2)
             .and_offset(1)
-            .order_by(move |_segment_reader: &dyn SegmentReaderTrait| move |doc: DocId| doc);
+            .order_by(move |_segment_reader: &dyn SegmentReader| move |doc: DocId| doc);
         let score_docs: Vec<(u32, DocAddress)> =
             index.reader()?.searcher().search(&text_query, &collector)?;
         assert_eq!(
@@ -1544,7 +1544,7 @@ mod tests {
         let text_query = query_parser.parse_query("droopy tax").unwrap();
         let collector = TopDocs::with_limit(2)
             .and_offset(1)
-            .order_by(move |_segment_reader: &dyn SegmentReaderTrait| move |doc: DocId| doc);
+            .order_by(move |_segment_reader: &dyn SegmentReader| move |doc: DocId| doc);
         let score_docs: Vec<(u32, DocAddress)> = index
             .reader()
             .unwrap()

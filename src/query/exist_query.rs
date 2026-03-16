@@ -10,7 +10,7 @@ use crate::query::boost_query::BoostScorer;
 use crate::query::explanation::does_not_match;
 use crate::query::{BitSetDocSet, EnableScoring, Explanation, Query, Scorer, Weight};
 use crate::schema::Type;
-use crate::{DocId, Score, SegmentReaderTrait, TantivyError};
+use crate::{DocId, Score, SegmentReader, TantivyError};
 
 /// Query that matches all documents with a non-null value in the specified
 /// field.
@@ -99,7 +99,7 @@ pub struct ExistsWeight {
 impl Weight for ExistsWeight {
     fn scorer(
         &self,
-        reader: &dyn SegmentReaderTrait,
+        reader: &dyn SegmentReader,
         boost: Score,
     ) -> crate::Result<Box<dyn Scorer>> {
         let fast_field_reader = reader.fast_fields();
@@ -168,7 +168,7 @@ impl Weight for ExistsWeight {
         Ok(Box::new(ConstScorer::new(docset, boost)))
     }
 
-    fn explain(&self, reader: &dyn SegmentReaderTrait, doc: DocId) -> crate::Result<Explanation> {
+    fn explain(&self, reader: &dyn SegmentReader, doc: DocId) -> crate::Result<Explanation> {
         let mut scorer = self.scorer(reader, 1.0)?;
         if scorer.seek(doc) != doc {
             return Err(does_not_match(doc));
