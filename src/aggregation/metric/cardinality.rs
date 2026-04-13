@@ -873,4 +873,77 @@ mod tests {
         // Should be 4 because salt makes (5, 0) != (2, 0) and (5, 1) != (2, 1)
         assert_eq!(estimate, 4.0);
     }
+
+    /// Simulates the Quickwit cross-split scenario:
+    /// two separate indices with overlapping string values,
+    /// each producing IntermediateAggregationResults via
+    /// DistributedAggregationCollector, merged via postcard.
+    #[test]
+    fn cardinality_cross_index_string_merge() -> crate::Result<()> {
+        use crate::aggregation::intermediate_agg_result::IntermediateAggregationResults;
+        use crate::aggregation::DistributedAggregationCollector;
+
+        let agg_req: Aggregations = serde_json::from_value(json!({
+            "unique_names": {
+                "cardinality": {
+                    "field": "name",
+                }
+            },
+        }))?;
+
+        let build_index = |names: &[&str]| -> crate::Result<Index> {
+            let mut schema_builder = Schema::builder();
+            schema_builder.add_text_field("name", STRING | FAST);
+            let schema = schema_builder.build();
+            let index = Index::create_in_ram(schema.clone());
+            let name_field = schema.get_field("name")?;
+            let mut writer = index.writer_for_tests()?;
+            for &name in names {
+                writer.add_document(doc!(name_field => name))?;
+            }
+            writer.commit()?;
+            Ok(index)
+        };
+
+        let index_a = build_index(&["Albert", "Fred", "Manfred", "Horst", "Fritz"])?;
+        let index_b = build_index(&["Fritz", "Fritz", "Holger", "Werner", "Bernhard"])?;
+
+        let collect_intermediate =
+            |index: &Index| -> crate::Result<IntermediateAggregationResults> {
+                let reader = index.reader()?;
+                let searcher = reader.searcher();
+                let collector = DistributedAggregationCollector::from_aggs(
+                    agg_req.clone(),
+                    crate::aggregation::AggContextParams::new(
+                        Default::default(),
+                        index.tokenizers().clone(),
+                    ),
+                );
+                searcher.search(&crate::query::AllQuery, &collector)
+            };
+
+        let intermediate_a = collect_intermediate(&index_a)?;
+        let intermediate_b = collect_intermediate(&index_b)?;
+
+        // Postcard roundtrip (simulates network transfer in Quickwit)
+        let bytes_a = postcard::to_allocvec(&intermediate_a).unwrap();
+        let bytes_b = postcard::to_allocvec(&intermediate_b).unwrap();
+
+        let mut merged: IntermediateAggregationResults =
+            postcard::from_bytes(&bytes_a).unwrap();
+        let other: IntermediateAggregationResults =
+            postcard::from_bytes(&bytes_b).unwrap();
+        merged.merge_fruits(other)?;
+
+        let final_result = merged.into_final_result(agg_req, Default::default())?;
+        let json = serde_json::to_value(&final_result)?;
+        let value = json["unique_names"]["value"].as_f64().unwrap();
+        eprintln!("cross-index cardinality: {value}");
+        assert_eq!(
+            value, 8.0,
+            "expected 8 unique names across 2 indices, got {value}"
+        );
+
+        Ok(())
+    }
 }
