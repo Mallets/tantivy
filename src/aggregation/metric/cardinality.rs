@@ -946,4 +946,211 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn cardinality_collector_postcard_merge_comparison() {
+        use super::CardinalityCollector;
+
+        let salt: u8 = 7;
+        let mut coll_a = CardinalityCollector::new(salt);
+        for name in &["Albert", "Fred", "Manfred", "Horst", "Fritz"] {
+            coll_a.insert(name);
+        }
+        let mut coll_b = CardinalityCollector::new(salt);
+        for name in &["Fritz", "Fritz", "Holger", "Werner", "Bernhard"] {
+            coll_b.insert(name);
+        }
+
+        let mut direct_a = coll_a.clone();
+        direct_a.merge_fruits(coll_b.clone()).unwrap();
+        let direct_est = direct_a.finalize().unwrap();
+        eprintln!("direct merge: {direct_est}");
+
+        let bytes_a = postcard::to_allocvec(&coll_a).unwrap();
+        let bytes_b = postcard::to_allocvec(&coll_b).unwrap();
+        eprintln!("postcard bytes: a={} b={}", bytes_a.len(), bytes_b.len());
+        eprintln!("sketch bytes: a={} b={}", coll_a.to_sketch_bytes().len(), coll_b.to_sketch_bytes().len());
+
+        let mut deser_a: CardinalityCollector = postcard::from_bytes(&bytes_a).unwrap();
+        let deser_b: CardinalityCollector = postcard::from_bytes(&bytes_b).unwrap();
+        eprintln!("deser_a est: {}", deser_a.clone().finalize().unwrap());
+        eprintln!("deser_b est: {}", deser_b.clone().finalize().unwrap());
+
+        deser_a.merge_fruits(deser_b).unwrap();
+        let postcard_est = deser_a.finalize().unwrap();
+        eprintln!("postcard merge: {postcard_est}");
+
+        assert_eq!(direct_est, postcard_est,
+            "direct={direct_est} postcard={postcard_est}");
+    }
+
+    #[test]
+    fn cardinality_postcard_nesting_isolation() {
+        use super::CardinalityCollector;
+        use crate::aggregation::intermediate_agg_result::{
+            IntermediateAggregationResult, IntermediateAggregationResults,
+            IntermediateMetricResult,
+        };
+
+        let salt: u8 = 7;
+        let mut coll = CardinalityCollector::new(salt);
+        for name in &["Albert", "Fred", "Manfred", "Horst", "Fritz"] {
+            coll.insert(name);
+        }
+        let original_est = coll.clone().finalize().unwrap();
+        eprintln!("original: {original_est}");
+
+        // Layer 1: CardinalityCollector alone
+        let bytes = postcard::to_allocvec(&coll).unwrap();
+        let deser: CardinalityCollector = postcard::from_bytes(&bytes).unwrap();
+        let l1 = deser.finalize().unwrap();
+        eprintln!("L1 (CardinalityCollector): {l1}");
+
+        // Layer 2: IntermediateMetricResult::Cardinality
+        let metric = IntermediateMetricResult::Cardinality(coll.clone());
+        let bytes = postcard::to_allocvec(&metric).unwrap();
+        let deser: IntermediateMetricResult = postcard::from_bytes(&bytes).unwrap();
+        let l2 = match deser {
+            IntermediateMetricResult::Cardinality(c) => c.finalize().unwrap(),
+            _ => panic!("wrong variant"),
+        };
+        eprintln!("L2 (IntermediateMetricResult): {l2}");
+
+        // Layer 3: IntermediateAggregationResult::Metric
+        let agg_result =
+            IntermediateAggregationResult::Metric(IntermediateMetricResult::Cardinality(
+                coll.clone(),
+            ));
+        let bytes = postcard::to_allocvec(&agg_result).unwrap();
+        let deser: IntermediateAggregationResult = postcard::from_bytes(&bytes).unwrap();
+        let l3 = match deser {
+            IntermediateAggregationResult::Metric(IntermediateMetricResult::Cardinality(c)) => {
+                c.finalize().unwrap()
+            }
+            _ => panic!("wrong variant"),
+        };
+        eprintln!("L3 (IntermediateAggregationResult): {l3}");
+
+        // Layer 4: IntermediateAggregationResults (full HashMap wrapper)
+        let mut results = IntermediateAggregationResults::default();
+        results
+            .push(
+                "unique_names".to_string(),
+                IntermediateAggregationResult::Metric(IntermediateMetricResult::Cardinality(
+                    coll.clone(),
+                )),
+            )
+            .unwrap();
+        let bytes = postcard::to_allocvec(&results).unwrap();
+        let deser: IntermediateAggregationResults = postcard::from_bytes(&bytes).unwrap();
+        let inner = deser.aggs_res.get("unique_names").unwrap();
+        let l4 = match inner {
+            IntermediateAggregationResult::Metric(IntermediateMetricResult::Cardinality(c)) => {
+                c.clone().finalize().unwrap()
+            }
+            _ => panic!("wrong variant"),
+        };
+        eprintln!("L4 (IntermediateAggregationResults): {l4}");
+
+        assert_eq!(original_est, l1, "L1 mismatch");
+        assert_eq!(original_est, l2, "L2 mismatch");
+        assert_eq!(original_est, l3, "L3 mismatch");
+        assert_eq!(original_est, l4, "L4 mismatch");
+    }
+
+    #[test]
+    fn cardinality_postcard_merge_via_intermediate_results() {
+        use super::CardinalityCollector;
+        use crate::aggregation::intermediate_agg_result::{
+            IntermediateAggregationResult, IntermediateAggregationResults,
+            IntermediateMetricResult,
+        };
+
+        let salt: u8 = 7;
+
+        let mut coll_a = CardinalityCollector::new(salt);
+        for name in &["Albert", "Fred", "Manfred", "Horst", "Fritz"] {
+            coll_a.insert(name);
+        }
+        let mut coll_b = CardinalityCollector::new(salt);
+        for name in &["Fritz", "Fritz", "Holger", "Werner", "Bernhard"] {
+            coll_b.insert(name);
+        }
+
+        let wrap = |coll: CardinalityCollector| -> IntermediateAggregationResults {
+            let mut results = IntermediateAggregationResults::default();
+            results
+                .push(
+                    "unique_names".to_string(),
+                    IntermediateAggregationResult::Metric(
+                        IntermediateMetricResult::Cardinality(coll),
+                    ),
+                )
+                .unwrap();
+            results
+        };
+
+        let results_a = wrap(coll_a.clone());
+        let results_b = wrap(coll_b.clone());
+
+        // Without postcard
+        let mut direct_a = results_a.clone();
+        direct_a.merge_fruits(results_b.clone()).unwrap();
+        let direct_inner = match direct_a.aggs_res.get("unique_names").unwrap() {
+            IntermediateAggregationResult::Metric(IntermediateMetricResult::Cardinality(c)) => c,
+            _ => panic!(),
+        };
+        let direct_est = direct_inner.clone().finalize().unwrap();
+        eprintln!("direct merge: {direct_est}");
+
+        // With postcard
+        let bytes_a = postcard::to_allocvec(&results_a).unwrap();
+        let bytes_b = postcard::to_allocvec(&results_b).unwrap();
+        eprintln!("postcard sizes: a={} b={}", bytes_a.len(), bytes_b.len());
+
+        let mut deser_a: IntermediateAggregationResults =
+            postcard::from_bytes(&bytes_a).unwrap();
+        let deser_b: IntermediateAggregationResults =
+            postcard::from_bytes(&bytes_b).unwrap();
+
+        // Check individual estimates after deserialization
+        let deser_a_inner = match deser_a.aggs_res.get("unique_names").unwrap() {
+            IntermediateAggregationResult::Metric(IntermediateMetricResult::Cardinality(c)) => c,
+            _ => panic!(),
+        };
+        eprintln!("deser_a estimate: {}", deser_a_inner.clone().finalize().unwrap());
+        let deser_b_inner = match deser_b.aggs_res.get("unique_names").unwrap() {
+            IntermediateAggregationResult::Metric(IntermediateMetricResult::Cardinality(c)) => c,
+            _ => panic!(),
+        };
+        eprintln!("deser_b estimate: {}", deser_b_inner.clone().finalize().unwrap());
+
+        // Compare raw sketch bytes
+        let orig_sketch_bytes = coll_a.to_sketch_bytes();
+        let deser_sketch_bytes = deser_a_inner.to_sketch_bytes();
+        eprintln!(
+            "sketch bytes match: {} (orig={} deser={})",
+            orig_sketch_bytes == deser_sketch_bytes,
+            orig_sketch_bytes.len(),
+            deser_sketch_bytes.len()
+        );
+        if orig_sketch_bytes != deser_sketch_bytes {
+            for (i, (a, b)) in orig_sketch_bytes.iter().zip(deser_sketch_bytes.iter()).enumerate() {
+                if a != b {
+                    eprintln!("  byte {i}: orig={a:#04x} deser={b:#04x}");
+                }
+            }
+        }
+
+        deser_a.merge_fruits(deser_b).unwrap();
+        let merged_inner = match deser_a.aggs_res.get("unique_names").unwrap() {
+            IntermediateAggregationResult::Metric(IntermediateMetricResult::Cardinality(c)) => c,
+            _ => panic!(),
+        };
+        let postcard_est = merged_inner.clone().finalize().unwrap();
+        eprintln!("postcard merge: {postcard_est}");
+
+        assert_eq!(direct_est, postcard_est,
+            "direct={direct_est} postcard={postcard_est}");
+    }
 }
