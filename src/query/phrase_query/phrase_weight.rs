@@ -1,11 +1,16 @@
+use std::sync::Arc;
+
 use crate::fieldnorm::FieldNormReader;
 use crate::index::SegmentReader;
 use crate::postings::TermInfo;
 use crate::query::bm25::Bm25Weight;
 use crate::query::explanation::does_not_match;
 use crate::query::{box_scorer, EmptyScorer, Explanation, Scorer, Weight};
-use crate::schema::Term;
+use crate::schema::{Field, Term};
 use crate::{try_downcast_and_call, DocId, DocSet, Score};
+
+use super::evaluator_phrase_scorer::EvaluatorPhraseScorer;
+use super::phrase_evaluator::PhraseEvaluator;
 
 pub struct PhraseWeight {
     phrase_terms: Vec<(usize, Term)>,
@@ -72,6 +77,36 @@ impl PhraseWeight {
                 return Ok(None);
             };
             term_infos.push((offset, term_info));
+        }
+
+        if let Some(evaluator) = reader.phrase_evaluator() {
+            let phrase_terms = &self.phrase_terms;
+            let slop = self.slop;
+            let scorer = try_downcast_and_call!(inverted_index_reader.as_ref(), |reader| {
+                let mut offset_and_term_postings = Vec::with_capacity(term_infos.len());
+                for (offset, term_info) in &term_infos {
+                    let postings = reader.read_postings_from_terminfo(
+                        term_info,
+                        crate::schema::IndexRecordOption::Basic,
+                    )?;
+                    offset_and_term_postings.push((*offset, postings));
+                }
+                let phrase_term_bytes: Vec<(usize, Vec<u8>)> = phrase_terms
+                    .iter()
+                    .map(|(offset, term)| (*offset, term.serialized_value_bytes().to_vec()))
+                    .collect();
+                let scorer = EvaluatorPhraseScorer::new(
+                    offset_and_term_postings,
+                    evaluator.clone(),
+                    field,
+                    phrase_term_bytes,
+                    similarity_weight_opt.clone(),
+                    fieldnorm_reader.clone(),
+                    slop,
+                );
+                std::io::Result::Ok(box_scorer(scorer))
+            })?;
+            return Ok(Some(scorer));
         }
 
         let slop = self.slop;

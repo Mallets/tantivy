@@ -1,9 +1,12 @@
+mod evaluator_phrase_scorer;
+mod phrase_evaluator;
 mod phrase_query;
 mod phrase_scorer;
 mod phrase_weight;
 pub mod regex_phrase_query;
 mod regex_phrase_weight;
 
+pub use self::phrase_evaluator::PhraseEvaluator;
 pub use self::phrase_query::PhraseQuery;
 pub(crate) use self::phrase_scorer::intersection_exists;
 pub use self::phrase_scorer::PhraseScorer;

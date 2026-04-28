@@ -88,6 +88,11 @@ pub trait SegmentReader: Send + Sync {
 
     /// Clones this reader into a shared trait object.
     fn clone_arc(&self) -> Arc<dyn SegmentReader>;
+
+    /// Returns an optional phrase evaluator that overrides position-based phrase matching.
+    fn phrase_evaluator(&self) -> Option<Arc<dyn crate::query::PhraseEvaluator>> {
+        None
+    }
 }
 
 /// Entry point to access all of the datastructures of the `Segment`
