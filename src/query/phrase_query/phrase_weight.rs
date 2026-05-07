@@ -87,7 +87,7 @@ impl PhraseWeight {
                 for (offset, term_info) in &term_infos {
                     let postings = reader.read_postings_from_terminfo(
                         term_info,
-                        crate::schema::IndexRecordOption::WithFreqsAndPositions,
+                        crate::schema::IndexRecordOption::Basic,
                     )?;
                     offset_and_term_postings.push((*offset, postings));
                 }

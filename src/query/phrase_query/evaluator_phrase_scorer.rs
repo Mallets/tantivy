@@ -9,7 +9,6 @@ use crate::schema::Field;
 use crate::{DocId, Score};
 
 use super::phrase_evaluator::{PhraseEvaluator, PhraseVerdict};
-use super::phrase_scorer::{intersection, intersection_exists};
 
 struct PostingsWithOffset<TPostings> {
     postings: TPostings,
@@ -40,11 +39,11 @@ impl<TPostings: Postings> DocSet for PostingsWithOffset<TPostings> {
     }
 }
 
-/// Phrase scorer that first delegates adjacency checks to a `PhraseEvaluator`.
+/// Phrase scorer that delegates adjacency checks to a `PhraseEvaluator`.
 ///
-/// When the evaluator returns `PhraseVerdict::Unknown` (e.g. for outlier docs),
-/// the scorer falls back to standard position-based phrase matching using the
-/// loaded postings.
+/// Postings are loaded as `Basic` (doc IDs only, no positions on disk). All
+/// phrase verification is handled by the evaluator. If the evaluator returns
+/// `PhraseVerdict::Unknown`, the document is treated as a non-match.
 pub(crate) struct EvaluatorPhraseScorer<TPostings: Postings> {
     intersection_docset:
         Intersection<PostingsWithOffset<TPostings>, PostingsWithOffset<TPostings>>,
@@ -56,8 +55,6 @@ pub(crate) struct EvaluatorPhraseScorer<TPostings: Postings> {
     phrase_count: u32,
     fieldnorm_reader: FieldNormReader,
     similarity_weight_opt: Option<Bm25Weight>,
-    left_positions: Vec<u32>,
-    right_positions: Vec<u32>,
 }
 
 impl<TPostings: Postings> EvaluatorPhraseScorer<TPostings> {
@@ -95,8 +92,6 @@ impl<TPostings: Postings> EvaluatorPhraseScorer<TPostings> {
             phrase_count: 0,
             fieldnorm_reader,
             similarity_weight_opt,
-            left_positions: Vec::with_capacity(100),
-            right_positions: Vec::with_capacity(100),
         };
         if scorer.doc() != TERMINATED && !scorer.phrase_match() {
             scorer.advance();
@@ -119,46 +114,11 @@ impl<TPostings: Postings> EvaluatorPhraseScorer<TPostings> {
                 self.phrase_count = 1;
                 true
             }
-            PhraseVerdict::NoMatch => {
+            PhraseVerdict::NoMatch | PhraseVerdict::Unknown => {
                 self.phrase_count = 0;
                 false
             }
-            PhraseVerdict::Unknown => {
-                let matched = self.position_based_phrase_match();
-                self.phrase_count = u32::from(matched);
-                matched
-            }
         }
-    }
-
-    /// Standard position-based phrase adjacency check, used as fallback when
-    /// the evaluator returns `Unknown`.
-    fn position_based_phrase_match(&mut self) -> bool {
-        if self.num_terms < 2 {
-            return true;
-        }
-        let first = self.intersection_docset.docset_mut_specialized(0);
-        first
-            .postings
-            .positions_with_offset(first.offset, &mut self.left_positions);
-
-        for i in 1..self.num_terms - 1 {
-            let ds = self.intersection_docset.docset_mut_specialized(i);
-            ds.postings
-                .positions_with_offset(ds.offset, &mut self.right_positions);
-            intersection(&mut self.left_positions, &self.right_positions);
-            if self.left_positions.is_empty() {
-                return false;
-            }
-        }
-
-        let last = self
-            .intersection_docset
-            .docset_mut_specialized(self.num_terms - 1);
-        last.postings
-            .positions_with_offset(last.offset, &mut self.right_positions);
-
-        intersection_exists(&self.left_positions, &self.right_positions)
     }
 }
 
