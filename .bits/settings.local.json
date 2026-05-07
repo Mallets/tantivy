@@ -1,0 +1,14 @@
+{
+  "lastAgent": "agent-09ae5f34-a1e4-49b0-9411-b661a27f64e0",
+  "lastSession": {
+    "agentId": "agent-09ae5f34-a1e4-49b0-9411-b661a27f64e0",
+    "conversationId": "conversation-709d9b8e-5a4c-498d-a6a8-d3ccc8a552d2"
+  },
+  "lastSessionByAgent": {
+    "agent-7c5bfbba-7976-4213-8d0a-8b4edc47b6cb": "conversation-8d026332-6dae-49d6-837f-f0caf68a312d",
+    "agent-e1c03c17-1c5e-469f-b3c6-5bd1e5c2a4a2": "conversation-63cafd5e-4a29-4dfc-9c6b-08cff24fcf37",
+    "agent-7e8c93a6-af23-4876-aeeb-68296046f543": "conversation-187a3490-6888-4882-9d85-d14985ed200e",
+    "agent-34296baf-e38f-4d52-80fb-8abbaf7cf7dd": "conversation-e4c758db-5a56-46e2-8481-e2cacef63fb0",
+    "agent-09ae5f34-a1e4-49b0-9411-b661a27f64e0": "conversation-709d9b8e-5a4c-498d-a6a8-d3ccc8a552d2"
+  }
+}

@@ -8,15 +8,17 @@ use crate::query::{Explanation, Intersection, Scorer};
 use crate::schema::Field;
 use crate::{DocId, Score};
 
-use super::phrase_evaluator::PhraseEvaluator;
+use super::phrase_evaluator::{PhraseEvaluator, PhraseVerdict};
+use super::phrase_scorer::intersection_exists;
 
 struct PostingsWithOffset<TPostings> {
     postings: TPostings,
+    offset: u32,
 }
 
 impl<TPostings: Postings> PostingsWithOffset<TPostings> {
-    fn new(postings: TPostings) -> Self {
-        Self { postings }
+    fn new(postings: TPostings, offset: u32) -> Self {
+        Self { postings, offset }
     }
 }
 
@@ -38,11 +40,11 @@ impl<TPostings: Postings> DocSet for PostingsWithOffset<TPostings> {
     }
 }
 
-/// Phrase scorer that delegates all adjacency checks to a `PhraseEvaluator`.
+/// Phrase scorer that first delegates adjacency checks to a `PhraseEvaluator`.
 ///
-/// The evaluator handles phrase matching for all documents by reconstructing
-/// token sequences from the doc store, so no position data is needed from the
-/// inverted index.
+/// When the evaluator returns `PhraseVerdict::Unknown` (e.g. for outlier docs),
+/// the scorer falls back to standard position-based phrase matching using the
+/// loaded postings.
 pub(crate) struct EvaluatorPhraseScorer<TPostings: Postings> {
     intersection_docset:
         Intersection<PostingsWithOffset<TPostings>, PostingsWithOffset<TPostings>>,
@@ -54,6 +56,8 @@ pub(crate) struct EvaluatorPhraseScorer<TPostings: Postings> {
     phrase_count: u32,
     fieldnorm_reader: FieldNormReader,
     similarity_weight_opt: Option<Bm25Weight>,
+    left_positions: Vec<u32>,
+    right_positions: Vec<u32>,
 }
 
 impl<TPostings: Postings> EvaluatorPhraseScorer<TPostings> {
@@ -64,14 +68,14 @@ impl<TPostings: Postings> EvaluatorPhraseScorer<TPostings> {
         phrase_terms: Vec<(usize, Vec<u8>)>,
         similarity_weight_opt: Option<Bm25Weight>,
         fieldnorm_reader: FieldNormReader,
-        _slop: u32,
+        slop: u32,
     ) -> Self {
         let num_docs = fieldnorm_reader.num_docs();
         let num_terms = term_postings_with_offset.len();
         let postings_with_offsets: Vec<PostingsWithOffset<TPostings>> =
             term_postings_with_offset
                 .into_iter()
-                .map(|(_offset, postings)| PostingsWithOffset::new(postings))
+                .map(|(offset, postings)| PostingsWithOffset::new(postings, offset as u32))
                 .collect();
         let intersection_docset = Intersection::new(postings_with_offsets, num_docs);
         let mut scorer = EvaluatorPhraseScorer {
@@ -80,10 +84,12 @@ impl<TPostings: Postings> EvaluatorPhraseScorer<TPostings> {
             evaluator,
             field,
             phrase_terms,
-            slop: _slop,
+            slop,
             phrase_count: 0,
             fieldnorm_reader,
             similarity_weight_opt,
+            left_positions: Vec::with_capacity(100),
+            right_positions: Vec::with_capacity(100),
         };
         if scorer.doc() != TERMINATED && !scorer.phrase_match() {
             scorer.advance();
@@ -98,11 +104,46 @@ impl<TPostings: Postings> EvaluatorPhraseScorer<TPostings> {
             .iter()
             .map(|(offset, bytes)| (*offset, bytes.as_slice()))
             .collect();
-        let matched = self
+        match self
             .evaluator
-            .phrase_matches(self.field, doc_id, &phrase_term_refs, self.slop);
-        self.phrase_count = u32::from(matched);
-        matched
+            .phrase_matches(self.field, doc_id, &phrase_term_refs, self.slop)
+        {
+            PhraseVerdict::Match => {
+                self.phrase_count = 1;
+                true
+            }
+            PhraseVerdict::NoMatch => {
+                self.phrase_count = 0;
+                false
+            }
+            PhraseVerdict::Unknown => {
+                let matched = self.position_based_phrase_match();
+                self.phrase_count = u32::from(matched);
+                matched
+            }
+        }
+    }
+
+    /// Standard position-based phrase adjacency check, used as fallback when
+    /// the evaluator returns `Unknown`.
+    fn position_based_phrase_match(&mut self) -> bool {
+        if self.num_terms < 2 {
+            return true;
+        }
+        let first = self.intersection_docset.docset_mut_specialized(0);
+        first.postings.positions_with_offset(first.offset, &mut self.left_positions);
+
+        for i in 1..self.num_terms {
+            let ds = self.intersection_docset.docset_mut_specialized(i);
+            ds.postings
+                .positions_with_offset(ds.offset, &mut self.right_positions);
+
+            if i < self.num_terms - 1 {
+                intersection_exists(&self.left_positions, &self.right_positions);
+                std::mem::swap(&mut self.left_positions, &mut self.right_positions);
+            }
+        }
+        intersection_exists(&self.left_positions, &self.right_positions)
     }
 }
 
