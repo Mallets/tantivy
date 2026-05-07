@@ -9,7 +9,7 @@ use crate::schema::Field;
 use crate::{DocId, Score};
 
 use super::phrase_evaluator::{PhraseEvaluator, PhraseVerdict};
-use super::phrase_scorer::intersection_exists;
+use super::phrase_scorer::{intersection, intersection_exists};
 
 struct PostingsWithOffset<TPostings> {
     postings: TPostings,
@@ -72,10 +72,17 @@ impl<TPostings: Postings> EvaluatorPhraseScorer<TPostings> {
     ) -> Self {
         let num_docs = fieldnorm_reader.num_docs();
         let num_terms = term_postings_with_offset.len();
+        let max_offset = term_postings_with_offset
+            .iter()
+            .map(|(offset, _)| *offset)
+            .max()
+            .unwrap_or(0);
         let postings_with_offsets: Vec<PostingsWithOffset<TPostings>> =
             term_postings_with_offset
                 .into_iter()
-                .map(|(offset, postings)| PostingsWithOffset::new(postings, offset as u32))
+                .map(|(offset, postings)| {
+                    PostingsWithOffset::new(postings, (max_offset - offset) as u32)
+                })
                 .collect();
         let intersection_docset = Intersection::new(postings_with_offsets, num_docs);
         let mut scorer = EvaluatorPhraseScorer {
@@ -131,18 +138,26 @@ impl<TPostings: Postings> EvaluatorPhraseScorer<TPostings> {
             return true;
         }
         let first = self.intersection_docset.docset_mut_specialized(0);
-        first.postings.positions_with_offset(first.offset, &mut self.left_positions);
+        first
+            .postings
+            .positions_with_offset(first.offset, &mut self.left_positions);
 
-        for i in 1..self.num_terms {
+        for i in 1..self.num_terms - 1 {
             let ds = self.intersection_docset.docset_mut_specialized(i);
             ds.postings
                 .positions_with_offset(ds.offset, &mut self.right_positions);
-
-            if i < self.num_terms - 1 {
-                intersection_exists(&self.left_positions, &self.right_positions);
-                std::mem::swap(&mut self.left_positions, &mut self.right_positions);
+            intersection(&mut self.left_positions, &self.right_positions);
+            if self.left_positions.is_empty() {
+                return false;
             }
         }
+
+        let last = self
+            .intersection_docset
+            .docset_mut_specialized(self.num_terms - 1);
+        last.postings
+            .positions_with_offset(last.offset, &mut self.right_positions);
+
         intersection_exists(&self.left_positions, &self.right_positions)
     }
 }

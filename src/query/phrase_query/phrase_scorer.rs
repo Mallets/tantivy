@@ -115,7 +115,7 @@ fn intersection_count(left: &[u32], right: &[u32]) -> usize {
 ///
 /// Returns the length of the intersection
 #[inline]
-fn intersection(left: &mut Vec<u32>, right: &[u32]) {
+pub(crate) fn intersection(left: &mut Vec<u32>, right: &[u32]) {
     let mut left_index = 0;
     let mut right_index = 0;
     let mut count = 0;
